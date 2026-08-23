@@ -7,9 +7,11 @@ arrival time.
 """
 from __future__ import annotations
 
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..analytics import item_analysis, remediation
@@ -19,6 +21,7 @@ from ..models import (
     AppealState,
     Assignment,
     Concept,
+    Course,
     EvaluationRun,
     MisconceptionCluster,
     RubricItem,
@@ -30,9 +33,41 @@ from ..models import (
     Verdict,
     VerdictState,
 )
-from ..services import analytics_service, grading_service, metrics_service
+from ..services import analytics_service, authoring_service, brief_analysis, grading_service, metrics_service
 
 router = APIRouter(prefix="/api/faculty", tags=["faculty"])
+
+
+class NewAssignmentRequest(BaseModel):
+    """Everything an instructor might fill in. Only title and brief are needed.
+
+    Leaving ``reference_solution`` blank switches the assignment to
+    approach-graded: no tests are generated, none run, and the rubric draws on
+    static and structural evidence instead. Leaving ``rubric`` blank has the
+    platform read one out of the brief.
+    """
+
+    faculty_id: str
+    title: str = Field(..., min_length=3)
+    brief: str = Field(..., min_length=10)
+    code: str | None = None
+    entry_point: str = "solution.py"
+    entry_call: str = "solve"
+    reference_solution: str = ""
+    requires_report: bool = False
+    due_at: datetime | None = None
+    opens_at: datetime | None = None
+    max_attempts: int = Field(10, ge=1, le=50)
+    rubric: list[dict] | None = None
+    tests: list[dict] | None = None
+    publish: bool = True
+
+
+class PreviewRequest(BaseModel):
+    brief: str
+    entry_call: str = "solve"
+    reference_solution: str = ""
+    requires_report: bool = False
 
 
 class OverrideRequest(BaseModel):
@@ -56,6 +91,141 @@ class AppealResolution(BaseModel):
     faculty_id: str
     upheld: bool
     note: str = ""
+
+
+@router.get("/courses/{course_id}/assignments")
+def faculty_assignments(course_id: str, session: Session = Depends(get_session)) -> list[dict]:
+    """Assignment list with the numbers a lecturer actually opens this page for."""
+    assignments = session.scalars(
+        select(Assignment).where(Assignment.course_id == course_id).order_by(Assignment.due_at)
+    ).all()
+    out = []
+    for assignment in assignments:
+        version = assignment.active_version
+        rows = session.execute(
+            select(Verdict)
+            .join(EvaluationRun, EvaluationRun.id == Verdict.run_id)
+            .join(SubmissionAttempt, SubmissionAttempt.id == EvaluationRun.attempt_id)
+            .join(Submission, Submission.id == SubmissionAttempt.submission_id)
+            .where(Submission.assignment_id == assignment.id, EvaluationRun.visible_only.is_(False))
+        ).scalars().all()
+        students = session.scalar(
+            select(func.count(Submission.id)).where(Submission.assignment_id == assignment.id)
+        ) or 0
+        scores = [v.total_fraction for v in rows]
+        out.append(
+            {
+                "id": assignment.id,
+                "code": assignment.code,
+                "title": assignment.title,
+                "due_at": assignment.due_at.isoformat() if assignment.due_at else None,
+                "requires_report": assignment.requires_report,
+                "published": bool(version and version.approved_at),
+                "grading_mode": version.grading_mode if version else "executable",
+                "generated_parts": version.generated_parts if version else [],
+                "rubric_items": len(version.rubric_items) if version else 0,
+                "tests": sum(1 for t in version.test_cases if t.validated_against_reference)
+                if version
+                else 0,
+                "submissions": students,
+                "graded": len(rows),
+                "needs_review": sum(1 for v in rows if v.state == VerdictState.ESCALATED),
+                "average": round(sum(scores) / len(scores), 4) if scores else None,
+            }
+        )
+    return out
+
+
+@router.post("/courses/{course_id}/assignments/preview")
+def preview_assignment(
+    course_id: str, payload: PreviewRequest, session: Session = Depends(get_session)
+) -> dict:
+    """Show what would be generated, before anything is created.
+
+    An instructor should be able to see the rubric the platform read out of
+    their brief and decide whether to accept it, edit it, or write their own -
+    without first committing an assignment to the course.
+    """
+    concepts = list(session.scalars(select(Concept).where(Concept.course_id == course_id)))
+    mode = authoring_service.resolve_grading_mode(payload.reference_solution)
+    drafter = authoring_service.HeuristicDrafter()
+    items = drafter.draft_rubric(
+        payload.brief, concepts, mode, payload.entry_call, payload.requires_report
+    )
+    requirements = brief_analysis.analyse_brief(payload.brief, payload.entry_call)
+    concept_names = {c.concept_key: c.name for c in concepts}
+    return {
+        "grading_mode": mode,
+        "grading_mode_explained": authoring_service.GRADING_MODES[mode],
+        "summary": brief_analysis.summarise(requirements),
+        "rubric": [
+            {
+                "item_key": item.item_key,
+                "text": item.text,
+                "category": item.category,
+                "weight": item.weight,
+                "checkable_by": item.checkable_by,
+                "static_check": item.static_check,
+                "concept_ids": item.concept_ids,
+                "concept_names": [concept_names.get(c, c) for c in item.concept_ids],
+            }
+            for item in items
+        ],
+        "read_from_brief": [
+            {"text": r.text, "from": r.source_phrase, "check": r.static_check}
+            for r in requirements
+        ],
+    }
+
+
+@router.post("/courses/{course_id}/assignments")
+def create_assignment(
+    course_id: str, payload: NewAssignmentRequest, session: Session = Depends(get_session)
+) -> dict:
+    """Create an assignment from a partially-filled form."""
+    if session.get(Course, course_id) is None:
+        raise HTTPException(404, "course not found")
+
+    spec = authoring_service.AssignmentDraftSpec(
+        title=payload.title,
+        brief=payload.brief,
+        code=payload.code,
+        entry_point=payload.entry_point,
+        entry_call=payload.entry_call,
+        reference_solution=payload.reference_solution,
+        requires_report=payload.requires_report,
+        due_at=payload.due_at,
+        opens_at=payload.opens_at,
+        max_attempts=payload.max_attempts,
+        rubric=payload.rubric,
+        tests=payload.tests,
+        approve_immediately=payload.publish,
+    )
+    try:
+        result = authoring_service.create_assignment(session, course_id, payload.faculty_id, spec)
+    except authoring_service.SchemaViolation as exc:
+        raise HTTPException(400, f"Rubric or test definition rejected: {exc}") from exc
+    session.commit()
+
+    version = result.version
+    return {
+        "assignment_id": version.assignment_id,
+        "version_id": version.id,
+        "published": version.approved_at is not None,
+        "grading_mode": result.grading_mode,
+        "grading_mode_explained": authoring_service.GRADING_MODES[result.grading_mode],
+        "generated": result.generated_parts,
+        "notes": result.notes,
+        "schema_repairs": result.repairs,
+        "reference_validation": {
+            "admitted": result.validation.admitted,
+            "discarded": result.validation.discarded,
+            "halted": result.halted,
+            "message": result.message,
+        },
+        "rubric_items": len(version.rubric_items),
+        "tests_admitted": sum(1 for t in version.test_cases if t.validated_against_reference),
+    }
 
 
 @router.get("/courses/{course_id}/health")

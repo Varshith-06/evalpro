@@ -283,6 +283,15 @@ class AssignmentVersion(Base):
     # A4 draft provenance: which model drafted this, and what faculty changed.
     drafted_by_model: Mapped[str | None] = mapped_column(String(64), default=None)
     authoring_edits: Mapped[list] = mapped_column(JSON, default=list)
+    # How this version can be graded, which follows from what the instructor
+    # supplied rather than from a setting. Without a reference solution no test
+    # can be validated, so no test may be admitted, so the oracle does not
+    # exist - and the platform grades the approach instead of the output.
+    grading_mode: Mapped[str] = mapped_column(String(24), default="executable")
+    # Which parts the platform generated because the instructor left them blank.
+    # Surfaced on the review screen: a generated rubric deserves more scrutiny
+    # than one a human wrote.
+    generated_parts: Mapped[list] = mapped_column(JSON, default=list)
 
     assignment: Mapped[Assignment] = relationship(back_populates="versions")
     rubric_items: Mapped[list[RubricItem]] = relationship(

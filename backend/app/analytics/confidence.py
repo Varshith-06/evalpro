@@ -39,6 +39,11 @@ FEATURES = (
     "entailment_contradiction_rate",
     "stage_error",
     "static_check_rate",
+    # 1.0 when a validated test suite existed for this assignment, 0.0 when the
+    # instructor supplied no reference solution and the work is approach-graded.
+    # Without an oracle the platform genuinely knows less, and the gate should
+    # reflect that rather than pretending the two cases are equivalent.
+    "has_executable_oracle",
 )
 
 # Hand-set priors used until override data exists. Signs are the domain
@@ -56,6 +61,7 @@ PRIOR_WEIGHTS: dict[str, float] = {
     "entailment_contradiction_rate": -0.26,
     "stage_error": -0.35,
     "static_check_rate": 0.05,
+    "has_executable_oracle": 0.10,
 }
 
 MODEL_PATH = VAR_DIR / "confidence_model.json"

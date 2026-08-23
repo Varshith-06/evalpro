@@ -144,6 +144,7 @@ def aggregate_item(
         "entailment_contradiction_rate": context.get("contradiction_rate", 0.0),
         "stage_error": 1.0 if context.get("stage_error") else 0.0,
         "static_check_rate": context.get("static_check_rate", 0.0),
+        "has_executable_oracle": context.get("has_executable_oracle", 1.0),
     }
     item_confidence = confidence_model.predict(features)
 

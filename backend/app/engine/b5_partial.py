@@ -374,6 +374,25 @@ ALGORITHM_SIGNATURES: dict[str, dict] = {
 }
 
 
+def _token_hits(tokens: tuple[str, ...], source: str) -> int:
+    """Count signature tokens present as *words*, not substrings.
+
+    Substring matching here was actively misleading: ``lo`` and ``hi`` occur
+    inside dozens of ordinary identifiers, so a linked-list reversal would be
+    reported to a student as a binary search. Evidence that a student can read
+    has to be evidence that is true.
+    """
+    lowered = source.lower()
+    hits = 0
+    for token in tokens:
+        if token.isalpha():
+            if re.search(rf"\b{re.escape(token)}\b", lowered):
+                hits += 1
+        elif token in lowered:
+            hits += 1
+    return hits
+
+
 def identify_algorithm(graph: CodeGraph, source: str) -> list[dict]:
     """Graph classification over the CFG, expressed as auditable rules.
 
@@ -381,14 +400,26 @@ def identify_algorithm(graph: CodeGraph, source: str) -> list[dict]:
     reference solutions and faculty tags. Until it has labels, these rules
     occupy the same interface and produce the same evidence shape, so swapping
     the model in changes nothing downstream.
+
+    Structure alone is not enough to name an algorithm -- almost every
+    algorithm here is "a loop with a branch in it" -- so the naming tokens are
+    required rather than merely contributory. Without them the classifier
+    returns nothing, which is the correct answer far more often than a guess.
     """
-    lowered = source.lower()
     max_loop_depth = max((fn.loop_depth for fn in graph.functions.values()), default=0)
     any_recursive = any(fn.is_recursive for fn in graph.functions.values())
     total_branches = sum(fn.branch_count for fn in graph.functions.values())
 
     matches: list[dict] = []
     for name, signature in ALGORITHM_SIGNATURES.items():
+        tokens = signature.get("tokens", ())
+        token_score = 1.0
+        if tokens:
+            hits = _token_hits(tokens, source)
+            if hits == 0:
+                continue        # no naming evidence at all: do not guess
+            token_score = min(1.0, hits / max(1.0, len(tokens) / 2))
+
         score = 0.0
         possible = 0.0
         if signature.get("requires_recursion"):
@@ -406,11 +437,10 @@ def identify_algorithm(graph: CodeGraph, source: str) -> list[dict]:
         if "min_branches" in signature:
             possible += 1
             score += 1 if total_branches >= signature["min_branches"] else 0
-        tokens = signature.get("tokens", ())
         if tokens:
             possible += 1
-            hits = sum(1 for token in tokens if token in lowered)
-            score += min(1.0, hits / max(1, len(tokens) / 2))
+            score += token_score
+
         confidence = score / possible if possible else 0.0
         if confidence >= 0.6:
             matches.append(
@@ -440,34 +470,72 @@ def structural_credit(
     expected_algorithm: str | None = None,
     variant_bank: list[str] | None = None,
 ) -> StructuralCredit:
-    similarity = tree_similarity(student_source, reference_source)
-    for variant in variant_bank or []:
-        similarity = max(similarity, tree_similarity(student_source, variant))
+    """Algorithm-comprehension credit from structure rather than output.
+
+    With a reference solution the strongest signal is how close the submission's
+    tree is to it. **Without one there is nothing to be similar to**, and
+    reporting 0% similarity would be a statement about the assignment rather
+    than about the student -- it would silently mark down every submission to an
+    approach-graded assignment. So in that case the credit comes from what can
+    still be established: whether a coherent algorithm class is identifiable at
+    all, and whether it is the one the brief asked for.
+    """
+    has_reference = bool((reference_source or "").strip())
+    similarity = 0.0
+    if has_reference:
+        similarity = tree_similarity(student_source, reference_source)
+        for variant in variant_bank or []:
+            similarity = max(similarity, tree_similarity(student_source, variant))
 
     matches = identify_algorithm(graph, student_source)
     matched = bool(expected_algorithm) and any(m["algorithm"] == expected_algorithm for m in matches)
+    top = matches[0] if matches else None
 
-    evidence: list[str] = [
-        f"Structural similarity to the reference solution: {similarity:.0%} (pq-gram profile over the AST)."
-    ]
-    if matches:
-        top = matches[0]
+    evidence: list[str] = []
+    if has_reference:
         evidence.append(
-            f"Algorithm identified as {top['algorithm']} ({top['description']}) "
+            f"Structural similarity to the reference solution: {similarity:.0%} "
+            "(pq-gram profile over the AST)."
+        )
+    else:
+        evidence.append(
+            "No reference solution exists for this assignment, so structure is judged on its own "
+            "terms rather than against a model answer."
+        )
+    if top:
+        evidence.append(
+            f"Algorithm identified as {top['algorithm'].replace('_', ' ')} ({top['description']}) "
             f"with confidence {top['confidence']:.0%}."
+        )
+    else:
+        evidence.append(
+            "No algorithm class could be identified from the control-flow graph with enough "
+            "confidence to name one."
         )
     if expected_algorithm and matched:
         evidence.append(
-            f"This is the required algorithm class ({expected_algorithm}), so algorithm-comprehension "
-            "credit is awarded independently of the test outcome."
+            f"This is the required approach ({expected_algorithm.replace('_', ' ')}), so "
+            "algorithm-comprehension credit is awarded independently of the test outcome."
         )
     elif expected_algorithm:
-        evidence.append(f"The required algorithm class ({expected_algorithm}) was not identified.")
+        evidence.append(
+            f"The required approach ({expected_algorithm.replace('_', ' ')}) was not identified."
+        )
 
-    fraction = 0.0
     if matched:
-        fraction = max(fraction, 0.6)
-    fraction = max(fraction, min(0.7, similarity * 1.1))
+        fraction = 0.85
+    elif has_reference:
+        fraction = min(0.7, similarity * 1.1)
+    elif top:
+        # Approach-graded: a confidently-identified, coherent algorithm is the
+        # evidence available, and it is real evidence.
+        fraction = min(0.8, 0.45 + 0.45 * top["confidence"])
+    else:
+        # Structure that resists classification is not a failure by itself; the
+        # named checks in the rubric carry the weight, so this abstains near the
+        # middle rather than voting the item down.
+        fraction = 0.4 if graph.parsed and graph.functions else 0.15
+
     return StructuralCredit(similarity, matches, matched, round(fraction, 4), evidence)
 
 
@@ -570,6 +638,58 @@ def check_no_global_state(graph: CodeGraph, spec: dict) -> tuple[bool, str]:
     return True, "No global-state mutation found."
 
 
+def check_class_defined(graph: CodeGraph, spec: dict) -> tuple[bool, str]:
+    name = spec.get("target") or ""
+    if name and name in graph.classes:
+        methods = graph.classes[name]
+        return True, f"class {name} is defined with method(s) {methods or '(none)'}."
+    if not name and graph.classes:
+        return True, f"Class(es) defined: {', '.join(sorted(graph.classes))}."
+    return False, f"Required class {name or '(any)'} is not defined."
+
+
+def check_algorithm_class(graph: CodeGraph, spec: dict) -> tuple[bool, str]:
+    """Does the submission implement the algorithm class the brief asked for?
+
+    This is the check that carries most of the weight when there is no reference
+    solution to test against: the question stops being "does it produce the
+    right output" and becomes "is this the approach the exercise was about".
+    """
+    expected = spec.get("target") or spec.get("algorithm") or ""
+    source = spec.get("_source", "")
+    matches = identify_algorithm(graph, source)
+    if not matches:
+        return False, (
+            "No algorithm class could be identified with sufficient confidence from the control-flow "
+            "graph."
+        )
+    names = ", ".join(f"{m['algorithm']} ({m['confidence']:.0%})" for m in matches)
+    if not expected:
+        return True, f"Algorithm class identified: {names}."
+    if any(m["algorithm"] == expected for m in matches):
+        return True, f"The required approach ({expected}) was identified. Also matched: {names}."
+    return False, f"The required approach ({expected}) was not identified. Identified instead: {names}."
+
+
+def check_uses_iteration(graph: CodeGraph, spec: dict) -> tuple[bool, str]:
+    for fn in _resolve_scope(graph, spec.get("scope")):
+        if fn.loop_depth > 0:
+            return True, f"{fn.name}() iterates (maximum nesting depth {fn.loop_depth})."
+    return False, "No loop appears in any function in the code graph."
+
+
+def check_min_functions(graph: CodeGraph, spec: dict) -> tuple[bool, str]:
+    """Decomposition: did the student break the problem up at all?"""
+    minimum = int(spec.get("min", 2))
+    count = len(graph.functions)
+    if count >= minimum:
+        return True, f"The submission defines {count} function(s), meeting the minimum of {minimum}."
+    return False, (
+        f"The submission defines {count} function(s); the brief expects the problem to be "
+        f"decomposed into at least {minimum}."
+    )
+
+
 def check_documented(graph: CodeGraph, spec: dict) -> tuple[bool, str]:
     ratio = graph.comment_lines / graph.loc if graph.loc else 0.0
     minimum = spec.get("min_ratio", 0.05)
@@ -587,9 +707,17 @@ STATIC_CHECKS = {
     "complexity_class": check_loop_nesting,
     "error_handling": check_error_handling,
     "function_defined": check_function_defined,
+    "class_defined": check_class_defined,
+    "algorithm_class": check_algorithm_class,
+    "uses_iteration": check_uses_iteration,
+    "min_functions": check_min_functions,
     "no_global_state": check_no_global_state,
     "documented": check_documented,
 }
+
+#: Checks that are heuristics rather than proofs. They participate as evidence
+#: at reduced reliability; they never decide an item on their own.
+ADVISORY_CHECKS = frozenset({"loop_nesting", "complexity_class", "algorithm_class"})
 
 
 @dataclass
@@ -600,16 +728,18 @@ class StaticCheckResult:
     advisory: bool = False
 
 
-def run_static_check(graph: CodeGraph, spec: dict) -> StaticCheckResult:
+def run_static_check(graph: CodeGraph, spec: dict, source: str = "") -> StaticCheckResult:
     kind = spec.get("kind", "")
     checker = STATIC_CHECKS.get(kind)
     if checker is None:
         return StaticCheckResult(kind, False, f"Unknown static check kind {kind!r} (authoring error).", advisory=True)
     try:
-        passed, detail = checker(graph, spec)
+        # A couple of checks need the raw source as well as the graph; passing
+        # it through the spec keeps the checker signature uniform.
+        passed, detail = checker(graph, {**spec, "_source": source})
     except Exception as exc:  # noqa: BLE001 - a broken check must not fail the run
         return StaticCheckResult(kind, False, f"Static check errored: {type(exc).__name__}: {exc}", advisory=True)
-    return StaticCheckResult(kind, passed, detail, advisory=kind in ("loop_nesting", "complexity_class"))
+    return StaticCheckResult(kind, passed, detail, advisory=kind in ADVISORY_CHECKS)
 
 
 def rebuild_graph(files: dict[str, str], entry: str | None) -> CodeGraph:

@@ -99,7 +99,15 @@ class EvaluationPipeline:
         self.session.flush()
 
         stages: list[StageRecord] = []
-        context: dict = {"stage_error": None}
+        # Approach-graded assignments have no reference solution, so no test was
+        # ever admitted and none will run. Several stages behave differently,
+        # and the evidence has to say so rather than looking like a failure.
+        static_mode = (version.grading_mode or "executable") != "executable"
+        context: dict = {
+            "stage_error": None,
+            "grading_mode": "static" if static_mode else "executable",
+            "has_executable_oracle": 0.0 if static_mode else 1.0,
+        }
 
         # -- B0 ---------------------------------------------------------
         t0 = time.perf_counter()
@@ -235,20 +243,35 @@ class EvaluationPipeline:
         passed = [e for e in ran if e.passed]
         pass_rate = len(passed) / len(ran) if ran else 0.0
         context["test_pass_rate"] = pass_rate
+        context["grading_mode"] = static_mode and "static" or "executable"
+        context["has_executable_oracle"] = 0.0 if static_mode else 1.0
         self._persist_tests(run, executions)
+        if ran:
+            execute_summary = (
+                f"{len(passed)}/{len(ran)} test(s) passed"
+                + (" on repaired source" if not build_result.ok else "")
+            )
+        elif static_mode:
+            execute_summary = (
+                "skipped - this assignment has no reference solution, so no oracle exists and no "
+                "test was ever admitted"
+            )
+        else:
+            execute_summary = "no executable tests (build failed and no repair found)"
+
         stages.append(
             StageRecord(
                 StageName.EXECUTE,
                 StageStatus.OK if ran else StageStatus.SKIPPED,
-                (
-                    f"{len(passed)}/{len(ran)} test(s) passed"
-                    + (" on repaired source" if not build_result.ok and ran else "")
-                    if ran
-                    else "no executable tests (build failed and no repair found)"
-                ),
+                execute_summary,
                 {
                     "pass_rate": round(pass_rate, 4),
-                    "oracle_location": "host - expected outputs never entered the sandbox",
+                    "grading_mode": context["grading_mode"],
+                    "oracle_location": (
+                        "none - approach-graded assignment"
+                        if static_mode
+                        else "host - expected outputs never entered the sandbox"
+                    ),
                     "isolation": describe_isolation()["applied_count"],
                     "results": [
                         {
@@ -275,14 +298,21 @@ class EvaluationPipeline:
             expected_algorithm=self._expected_algorithm(version),
         )
         pre_screen = static_pre_screen(files)
+        if static_mode:
+            structural_summary = (
+                f"{len(structural.algorithm_matches)} algorithm class(es) identified "
+                "(no reference solution to compare against)"
+            )
+        else:
+            structural_summary = (
+                f"structural similarity to reference {structural.similarity_to_reference:.0%}; "
+                f"{len(structural.algorithm_matches)} algorithm class(es) identified"
+            )
         stages.append(
             StageRecord(
                 StageName.PARTIAL_CREDIT,
                 StageStatus.OK,
-                (
-                    f"structural similarity to reference {structural.similarity_to_reference:.0%}; "
-                    f"{len(structural.algorithm_matches)} algorithm class(es) identified"
-                ),
+                structural_summary,
                 {
                     "similarity_to_reference": round(structural.similarity_to_reference, 4),
                     "algorithm_matches": structural.algorithm_matches,
@@ -328,7 +358,8 @@ class EvaluationPipeline:
         # -- B7 ---------------------------------------------------------
         t0 = time.perf_counter()
         items = self._aggregate_items(
-            rubric_items, executions, execution_graph, structural, report_result, context, repair
+            rubric_items, executions, execution_graph, structural, report_result,
+            context, repair, source_blob,
         )
         static_rate = _static_check_rate(items)
         context["static_check_rate"] = static_rate
@@ -467,6 +498,7 @@ class EvaluationPipeline:
         report_result: b6_report.ReportCheckResult,
         context: dict,
         repair: b5_partial.RepairResult,
+        source_blob: str = "",
     ) -> list[b7_gate.ItemAggregate]:
         by_test = {e.test_key: e for e in executions}
         coverage_by_item = {c["item_key"]: c for c in report_result.coverage}
@@ -507,7 +539,7 @@ class EvaluationPipeline:
 
             # --- static signal -----------------------------------------
             if item.static_check:
-                result = b5_partial.run_static_check(graph, item.static_check)
+                result = b5_partial.run_static_check(graph, item.static_check, source_blob)
                 source = "static_advisory" if result.advisory else "static"
                 signals.append(
                     b7_gate.Signal(
@@ -527,7 +559,11 @@ class EvaluationPipeline:
             # are checked some other way.
             wants_structural = "structural" in (item.checkable_by or [])
             tests_expected_but_absent = bool(item.test_ids) and not ran
-            if wants_structural or (tests_expected_but_absent and item.auto_gradeable):
+            # Where an exact static query already answers the item -- is there a
+            # guard, is it recursive, was the forbidden API used -- a similarity
+            # heuristic can only dilute a definitive answer, so it is not added.
+            decided_by_static = any(s.source == "static" for s in signals)
+            if (wants_structural or (tests_expected_but_absent and item.auto_gradeable)) and not decided_by_static:
                 signals.append(
                     b7_gate.Signal(
                         "structural",

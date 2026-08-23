@@ -146,20 +146,46 @@ backend. An operator should never have to guess how contained the grader is.
 
 ---
 
-## What the interfaces answer
+## The interface
 
-Each role gets one landing view answering one question. Everything else is a
-drill-in. Resisting the dashboard-of-everything is the design.
+One screen per task, with a sidebar that changes by role. Sign in as anyone on
+the roster from the top-left picker, or deep-link with `?as=faculty`.
 
-| Role | Question | Landing view |
-|---|---|---|
-| **Student** | *What should I work on next?* | The mastery map — the concept DAG shaded by mastery with prerequisite gaps highlighted — plus ranked next actions with the reason and the evidence |
-| **Faculty** | *What should I teach next?* | Cohort mastery heatmap, re-teach signals ranked by downstream prerequisite impact, broken-item alerts, intervention list |
-| **Administrator** | *Where is this programme weak?* | CO–PO attainment with drill-down to evidence, at-risk cohort with contributing factors, platform trust metrics, integrity dashboard |
+| Role | Screens |
+|---|---|
+| **Student** | *My labs* — status and score per lab · *Lab* — read the brief, write and submit code, see previous attempts · *Feedback* — per-criterion marks with the specific reason for each, and a button to question any of them · *My progress* — topic map, what to revise next |
+| **Faculty** | *Assignments* — list, and **New assignment** · *To review* — the queue, most useful first · *Submission* — their code beside what each criterion found, approve or change a mark · *Class progress* — topics to go back over, who to check in with, which criteria are not working · *Common mistakes* — groups of students who got the same thing wrong |
+| **Administrator** | *Outcomes* — CO/PO attainment, exportable · *Students at risk* · *Integrity* · *System* — marking quality, fairness audit, sandbox status |
 
 Student feedback is never "72/100". It is *"Empty-input handling: 0/8. Test 11
 crashed with IndexError at solution.py:14. No length guard found on the input
 path."*
+
+---
+
+## Creating an assignment
+
+An instructor can stop at any level of effort, and the platform fills in the
+rest — or works around it.
+
+| What you give it | What happens |
+|---|---|
+| Title + instructions | It reads the instructions for requirements it can actually check, writes a rubric, and marks the **approach**: does the code run, does it use what you asked for, how is it built |
+| … + a model solution | It generates test cases, **validates every one against your solution**, discards any that fail, and runs the rest on every submission |
+| … + your own rubric | Yours is used verbatim |
+
+The **New assignment** screen previews the rubric it read out of your brief
+before anything is created, and every generated item traces back to a phrase
+you wrote.
+
+Two rules the authoring flow will not bend on:
+
+- **No executable grading without a model solution.** A generated test that
+  nothing has verified is how a hallucinated expected output silently penalises
+  a whole cohort, so the mode is derived from your inputs rather than chosen.
+- **No rubric item that cannot earn evidence.** An item with nothing behind it
+  is a mark no submission can ever get, so approval is refused rather than
+  quietly capping everyone's grade.
 
 ---
 

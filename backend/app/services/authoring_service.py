@@ -33,6 +33,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..engine.b4_execute import ReferenceValidation, validate_against_reference
+from . import brief_analysis
 from ..engine.sandbox import DEFAULT_SANDBOX
 from ..models import (
     Assignment,
@@ -89,7 +90,14 @@ class Drafter(Protocol):
 
     name: str
 
-    def draft_rubric(self, brief: str, concepts: list[Concept]) -> list[DraftRubricItem]: ...
+    def draft_rubric(
+        self,
+        brief: str,
+        concepts: list[Concept],
+        mode: str = "executable",
+        entry_call: str = "solve",
+        requires_report: bool = False,
+    ) -> list[DraftRubricItem]: ...
     def draft_tests(self, brief: str, entry_call: str) -> list[DraftTestCase]: ...
     def draft_concepts(self, syllabus: str, course_code: str) -> list[DraftConcept]: ...
 
@@ -173,46 +181,113 @@ _CATEGORY_HINTS = (
 class HeuristicDrafter:
     """Deterministic drafter. No API key, no network, fully reproducible.
 
-    It reads the structure instructors actually write -- bulleted requirements --
-    and proposes concept tags by lexical overlap against the course graph. It is
-    weaker than an LLM at understanding a rambling brief and exactly as safe,
-    because A3 validates everything either produces.
+    It reads the brief for requirements a parser can actually verify (see
+    ``brief_analysis``) and proposes concept tags by lexical overlap against
+    the course graph. It is weaker than an LLM at understanding a rambling
+    brief and exactly as safe, because A3 validates everything either produces
+    and a human approves it either way.
+
+    ``mode`` changes what it is willing to emit. In ``static`` mode there is no
+    reference solution, so no test can ever be validated and no rubric item may
+    claim to be test-checkable. Emitting one anyway would produce items that
+    can never earn evidence, which is the worst possible failure here: a
+    student loses marks for something the platform structurally cannot assess.
     """
 
-    name = "heuristic-drafter-1.0"
+    name = "heuristic-drafter-2.0"
 
-    def draft_rubric(self, brief: str, concepts: list[Concept]) -> list[DraftRubricItem]:
-        requirements = [m.group(1).strip() for m in _REQUIREMENT_MARKERS.finditer(brief)]
-        if not requirements:
-            requirements = [s.strip() for s in re.split(r"(?<=[.!?])\s+", brief) if len(s.strip()) > 25]
+    def draft_rubric(
+        self,
+        brief: str,
+        concepts: list[Concept],
+        mode: str = "executable",
+        entry_call: str = "solve",
+        requires_report: bool = False,
+    ) -> list[DraftRubricItem]:
+        requirements = brief_analysis.analyse_brief(brief, entry_call)
 
         items: list[DraftRubricItem] = []
-        for index, text in enumerate(requirements[:12], start=1):
-            lowered = text.lower()
-            category, checks = "correctness", ["test"]
-            for needles, cat, check_list in _CATEGORY_HINTS:
-                if any(n in lowered for n in needles):
-                    category, checks = cat, list(check_list)
-                    break
+        for index, requirement in enumerate(requirements[:12], start=1):
+            checks = list(requirement.checkable_by)
+            if mode == "executable" and requirement.static_check is None and "report" not in checks:
+                checks.append("test")
+            if not requires_report and "report" in checks:
+                checks = [c for c in checks if c != "report"] or ["static"]
             items.append(
                 DraftRubricItem(
                     item_key=f"rb_{index:02d}",
-                    text=text.rstrip("."),
-                    category=category,
-                    weight=8.0 if category == "correctness" else 5.0,
-                    concept_ids=self._propose_concepts(text, concepts),
+                    text=requirement.text,
+                    category=requirement.category,
+                    weight=requirement.weight,
+                    concept_ids=self._propose_concepts(
+                        f"{requirement.text} {requirement.source_phrase}", requirement.concept_hints, concepts
+                    ),
                     checkable_by=checks,
-                    static_check=self._propose_static_check(lowered),
+                    static_check=requirement.static_check,
                 )
             )
+
+        # In executable mode the tests are the primary evidence, so there must
+        # be at least one item they can attach to.
+        if mode == "executable" and not any("test" in i.checkable_by for i in items):
+            items.append(
+                DraftRubricItem(
+                    item_key=f"rb_{len(items) + 1:02d}",
+                    text="Produces correct output for the specified behaviour",
+                    category="correctness",
+                    weight=10.0,
+                    concept_ids=self._propose_concepts(brief, [], concepts),
+                    checkable_by=["test"],
+                )
+            )
+
+        # A thin rubric is an honest outcome for a vague brief, but a rubric of
+        # one item grades nothing. Where the brief gave little to work with, add
+        # the two things that are checkable for any program at all.
+        #
+        # Deliberately *not* added here: a generic "implements a recognisable
+        # algorithm" item. The algorithm classifier knows a handful of named
+        # algorithms from this course; asked about anything else it correctly
+        # says "no idea", and an item built on that would mark down every
+        # correct submission to an unusual assignment. It is only emitted when
+        # the brief actually names an algorithm, which analyse_brief detects.
+        if mode == "static" and len(items) < 3:
+            existing = {(i.static_check or {}).get("kind") for i in items}
+            if "min_functions" not in existing:
+                items.append(
+                    DraftRubricItem(
+                        item_key=f"rb_{len(items) + 1:02d}",
+                        text="Decomposes the problem into named functions rather than one block",
+                        category="style",
+                        weight=4.0,
+                        concept_ids=self._propose_concepts(brief, [], concepts),
+                        checkable_by=["static"],
+                        static_check={"kind": "min_functions", "min": 1},
+                    )
+                )
+            if "documented" not in existing:
+                items.append(
+                    DraftRubricItem(
+                        item_key=f"rb_{len(items) + 1:02d}",
+                        text="Explains its intent in comments a reader can follow",
+                        category="style",
+                        weight=4.0,
+                        concept_ids=self._propose_concepts(brief, [], concepts),
+                        checkable_by=["static"],
+                        static_check={"kind": "documented", "min_ratio": 0.05},
+                    )
+                )
         return items
 
-    def _propose_concepts(self, text: str, concepts: list[Concept]) -> list[str]:
-        words = {w for w in re.findall(r"[a-z]{4,}", text.lower())}
+    def _propose_concepts(
+        self, text: str, hints: list[str], concepts: list[Concept]
+    ) -> list[str]:
+        haystack_text = f"{text} {' '.join(hints)}"
+        words = {w for w in re.findall(r"[a-z]{4,}", haystack_text.lower())}
         scored: list[tuple[float, str]] = []
         for concept in concepts:
-            haystack = f"{concept.name} {concept.description}".lower()
-            concept_words = {w for w in re.findall(r"[a-z]{4,}", haystack)}
+            concept_text = f"{concept.name} {concept.description}".lower()
+            concept_words = {w for w in re.findall(r"[a-z]{4,}", concept_text)}
             if not concept_words:
                 continue
             overlap = len(words & concept_words) / len(concept_words)
@@ -220,19 +295,6 @@ class HeuristicDrafter:
                 scored.append((overlap, concept.concept_key))
         scored.sort(reverse=True)
         return [key for _, key in scored[:2]]
-
-    def _propose_static_check(self, lowered: str) -> dict | None:
-        if "empty" in lowered or "boundary" in lowered:
-            return {"kind": "guard_present", "target": "input_length"}
-        if "recursi" in lowered:
-            return {"kind": "recursion_present"}
-        if "exception" in lowered or "error" in lowered:
-            return {"kind": "error_handling"}
-        if "complexity" in lowered or "o(n)" in lowered:
-            return {"kind": "loop_nesting", "max_depth": 1}
-        if "document" in lowered or "comment" in lowered:
-            return {"kind": "documented", "min_ratio": 0.05}
-        return None
 
     def draft_tests(self, brief: str, entry_call: str) -> list[DraftTestCase]:
         """Property tests first.
@@ -294,6 +356,38 @@ class AuthoringResult:
     validation: ReferenceValidation
     halted: bool
     message: str
+    grading_mode: str = "executable"
+    generated_parts: list[str] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
+
+
+#: What each mode means, in the words the review screen shows the instructor.
+GRADING_MODES = {
+    "executable": (
+        "Executable. You supplied a reference solution, so tests were generated, validated against "
+        "it, and will run against every submission in the sandbox. Output correctness is the primary "
+        "evidence."
+    ),
+    "static": (
+        "Approach-graded. You did not supply a reference solution, so there is no oracle and no test "
+        "can be validated - none will run. The platform grades what it can verify without one: "
+        "whether the code compiles, whether it uses the constructs your brief asks for, what "
+        "algorithm it implements, and whether the report describes the code that was actually "
+        "submitted. Expect more submissions to be routed to you for review, which is the honest "
+        "consequence of grading without an oracle rather than a defect."
+    ),
+}
+
+
+def resolve_grading_mode(reference_solution: str | None) -> str:
+    """The mode follows from the inputs, not from a setting.
+
+    Without a reference solution nothing can validate a generated test, so
+    admitting one would mean grading a cohort against an unverified expected
+    output — the exact failure A3 exists to prevent. So there is no way to ask
+    for executable grading without supplying the thing that makes it safe.
+    """
+    return "executable" if (reference_solution or "").strip() else "static"
 
 
 def draft_assignment_version(
@@ -305,16 +399,62 @@ def draft_assignment_version(
     entry_call: str = "solve",
     drafter: Drafter | None = None,
     created_by: str | None = None,
+    rubric: list[DraftRubricItem] | None = None,
+    tests: list[DraftTestCase] | None = None,
+    requires_report: bool = False,
 ) -> AuthoringResult:
-    """A1 + A2 + A3. Produces an *unapproved* version. Nothing grades yet."""
+    """A1 + A2 + A3. Produces an *unapproved* version. Nothing grades yet.
+
+    Every input except the brief is optional. Whatever the instructor leaves
+    blank is generated and **marked as generated**, so the review screen can
+    ask for more scrutiny on the parts no human wrote.
+    """
     drafter = drafter or HeuristicDrafter()
+    mode = resolve_grading_mode(reference_solution)
     concepts = list(
         session.scalars(select(Concept).where(Concept.course_id == assignment.course_id))
     )
     concept_keys = {c.concept_key for c in concepts}
 
-    rubric_draft = drafter.draft_rubric(brief, concepts)
-    test_draft = drafter.draft_tests(brief, entry_call)
+    generated: list[str] = []
+    notes: list[str] = []
+
+    if rubric:
+        rubric_draft = list(rubric)
+    else:
+        rubric_draft = drafter.draft_rubric(brief, concepts, mode, entry_call, requires_report)
+        generated.append("rubric")
+        notes.append(brief_analysis.summarise(brief_analysis.analyse_brief(brief, entry_call)))
+
+    if mode == "static":
+        # No oracle exists, so no item may claim to be test-checkable. Leaving
+        # such an item in place would create marks a submission can never earn.
+        stripped = 0
+        for item in rubric_draft:
+            if "test" in item.checkable_by:
+                item.checkable_by = [c for c in item.checkable_by if c != "test"]
+                item.test_ids = []
+                stripped += 1
+                if not item.checkable_by:
+                    item.checkable_by = ["structural"]
+        if stripped:
+            notes.append(
+                f"{stripped} rubric item(s) asked for test evidence, which cannot exist without a "
+                "reference solution. They now draw on static and structural evidence instead."
+            )
+        test_draft: list[DraftTestCase] = []
+        if tests:
+            notes.append(
+                f"{len(tests)} supplied test case(s) were discarded: with no reference solution there "
+                "is nothing to validate them against, and an unvalidated test can silently penalise "
+                "a whole cohort."
+            )
+    elif tests:
+        test_draft = list(tests)
+    else:
+        test_draft = drafter.draft_tests(brief, entry_call)
+        generated.append("tests")
+
     repairs = validate_rubric_draft(rubric_draft, concept_keys)
     repairs += validate_test_draft(test_draft)
 
@@ -330,10 +470,12 @@ def draft_assignment_version(
         version=next_version,
         spec_text=brief,
         entry_point=entry_point,
-        reference_solution=reference_solution,
+        reference_solution=reference_solution or "",
         created_by=created_by,
-        drafted_by_model=drafter.name,
+        drafted_by_model=drafter.name if generated else "faculty-authored",
         authoring_edits=[{"kind": "schema_repair", "detail": r} for r in repairs],
+        grading_mode=mode,
+        generated_parts=generated,
     )
     session.add(version)
     session.flush()
@@ -372,13 +514,25 @@ def draft_assignment_version(
         )
     session.flush()
 
-    validation = run_reference_validation(session, version)
+    if mode == "executable":
+        validation = run_reference_validation(session, version)
+    else:
+        validation = ReferenceValidation(
+            message=(
+                "Skipped: there is no reference solution to validate against, so no test was "
+                "generated and none will run."
+            )
+        )
+
     return AuthoringResult(
         version=version,
         repairs=repairs,
         validation=validation,
         halted=validation.halted,
         message=validation.message,
+        grading_mode=mode,
+        generated_parts=generated,
+        notes=notes,
     )
 
 
@@ -424,25 +578,177 @@ def approve_version(
     version, not thrown away, because it is the training set for the next
     drafting model.
     """
-    unvalidated = [
-        t for t in session.scalars(select(TestCase).where(TestCase.version_id == version.id))
-        if not t.validated_against_reference
-    ]
-    admitted = [
-        t for t in session.scalars(select(TestCase).where(TestCase.version_id == version.id))
-        if t.validated_against_reference
-    ]
-    if not admitted:
-        raise ValueError(
-            "No test survived reference validation. Approving this version would grade a cohort "
-            "against tests that the reference solution itself fails."
-        )
+    all_tests = list(session.scalars(select(TestCase).where(TestCase.version_id == version.id)))
+    admitted = [t for t in all_tests if t.validated_against_reference]
+    items = list(session.scalars(select(RubricItem).where(RubricItem.version_id == version.id)))
+
+    if not items:
+        raise ValueError("This version has no rubric items, so there is nothing to grade against.")
+
+    if version.grading_mode == "executable":
+        if not admitted:
+            raise ValueError(
+                "No test survived reference validation. Approving this version would grade a cohort "
+                "against tests that the reference solution itself fails."
+            )
+    else:
+        # Approach-graded. There is no oracle, so the only thing that makes the
+        # rubric gradeable at all is that its items carry checks which do not
+        # need one.
+        checkable = [
+            item for item in items
+            if item.static_check or {"structural", "report"} & set(item.checkable_by or [])
+        ]
+        if not checkable:
+            raise ValueError(
+                "Without a reference solution, every rubric item needs a static check, structural "
+                "evidence, or the report to draw on - otherwise no item can earn evidence and every "
+                "submission would score zero. Add a reference solution, or give the items checks."
+            )
 
     version.approved_by = faculty_id
     version.approved_at = _now()
     version.authoring_edits = list(version.authoring_edits or []) + list(edits or [])
     session.flush()
     return version
+
+
+# --------------------------------------------------------------------------
+# Creating an assignment from whatever the instructor gives us
+# --------------------------------------------------------------------------
+@dataclass
+class AssignmentDraftSpec:
+    """Everything an instructor might supply. Only ``title`` and ``brief`` are
+    genuinely required; the rest is filled in or worked around."""
+
+    title: str
+    brief: str
+    code: str | None = None
+    entry_point: str = "solution.py"
+    entry_call: str = "solve"
+    reference_solution: str = ""
+    requires_report: bool = False
+    due_at: datetime | None = None
+    opens_at: datetime | None = None
+    max_attempts: int = 10
+    rubric: list[dict] | None = None
+    tests: list[dict] | None = None
+    approve_immediately: bool = True
+
+
+def _next_code(session: Session, course_id: str) -> str:
+    existing = list(
+        session.scalars(select(Assignment.code).where(Assignment.course_id == course_id))
+    )
+    numbers = [
+        int(match.group(1))
+        for code in existing
+        if (match := re.search(r"(\d+)$", code or ""))
+    ]
+    return f"LAB{max(numbers, default=0) + 1:02d}"
+
+
+def _rubric_from_payload(rows: list[dict]) -> list[DraftRubricItem]:
+    items: list[DraftRubricItem] = []
+    for index, row in enumerate(rows, start=1):
+        text = (row.get("text") or "").strip()
+        if not text:
+            continue
+        items.append(
+            DraftRubricItem(
+                item_key=row.get("item_key") or f"rb_{index:02d}",
+                text=text,
+                category=row.get("category") or "correctness",
+                weight=float(row.get("weight") or 5.0),
+                concept_ids=list(row.get("concept_ids") or []),
+                checkable_by=list(row.get("checkable_by") or []) or ["static"],
+                test_ids=list(row.get("test_ids") or []),
+                static_check=row.get("static_check"),
+            )
+        )
+    return items
+
+
+def _tests_from_payload(rows: list[dict], entry_call: str) -> list[DraftTestCase]:
+    tests: list[DraftTestCase] = []
+    for index, row in enumerate(rows, start=1):
+        if row.get("expected_output") is None and row.get("property_spec") is None:
+            continue
+        tests.append(
+            DraftTestCase(
+                test_key=row.get("test_key") or f"tc_{index:02d}",
+                category=row.get("category") or "basic",
+                weight=float(row.get("weight") or 1.0),
+                call=row.get("call") or entry_call,
+                args=row.get("args"),
+                expected_output=row.get("expected_output"),
+                property_spec=row.get("property_spec"),
+                hidden=bool(row.get("hidden")),
+            )
+        )
+    return tests
+
+
+def create_assignment(
+    session: Session,
+    course_id: str,
+    faculty_id: str,
+    spec: AssignmentDraftSpec,
+    drafter: Drafter | None = None,
+) -> AuthoringResult:
+    """Create an assignment from a partially-filled form.
+
+    The whole point is that an instructor can stop at any level of effort:
+
+    * brief only -> the platform reads the brief for checkable requirements and
+      grades the approach;
+    * brief + reference solution -> tests are generated, validated against the
+      reference, and executed;
+    * brief + rubric -> the instructor's rubric is used verbatim;
+    * everything -> nothing is generated at all.
+
+    What is *not* offered is executable grading without a reference solution.
+    That would mean running tests nothing has verified.
+    """
+    assignment = Assignment(
+        course_id=course_id,
+        code=(spec.code or "").strip() or _next_code(session, course_id),
+        title=spec.title.strip(),
+        opens_at=spec.opens_at,
+        due_at=spec.due_at,
+        max_attempts=spec.max_attempts,
+        requires_report=spec.requires_report,
+    )
+    session.add(assignment)
+    session.flush()
+
+    result = draft_assignment_version(
+        session,
+        assignment,
+        brief=spec.brief,
+        reference_solution=spec.reference_solution,
+        entry_point=spec.entry_point or "solution.py",
+        entry_call=spec.entry_call or "solve",
+        drafter=drafter,
+        created_by=faculty_id,
+        rubric=_rubric_from_payload(spec.rubric) if spec.rubric else None,
+        tests=_tests_from_payload(spec.tests, spec.entry_call) if spec.tests else None,
+        requires_report=spec.requires_report,
+    )
+
+    if spec.approve_immediately and not result.halted:
+        try:
+            approve_version(session, result.version, faculty_id)
+        except ValueError as exc:
+            result.notes.append(f"Saved as a draft rather than published: {exc}")
+    elif result.halted:
+        result.notes.append(
+            "Saved as a draft. Reference validation halted, so this must not go live until the "
+            "brief is clarified."
+        )
+
+    session.flush()
+    return result
 
 
 def apply_faculty_edits(

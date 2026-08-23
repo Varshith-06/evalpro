@@ -90,6 +90,9 @@ Reading another student's run returns `403`.
 
 | Method | Path | Purpose |
 |---|---|---|
+| `GET` | `/api/faculty/courses/{course_id}/assignments` | Assignment list with grading mode, submission counts and review backlog |
+| `POST` | `/api/faculty/courses/{course_id}/assignments/preview` | **Dry run**: what rubric would be generated from this brief, without creating anything |
+| `POST` | `/api/faculty/courses/{course_id}/assignments` | Create an assignment from a partially-filled form |
 | `GET` | `/api/faculty/courses/{course_id}/health` | Cohort heatmap, re-teach signals, broken items, misconceptions, interventions, pacing |
 | `GET` | `/api/faculty/courses/{course_id}/queue` | Review queue, sorted by expected value of attention |
 | `GET` | `/api/faculty/runs/{run_id}/review` | Side-by-side evidence, reference solution, similarity report |
@@ -100,6 +103,45 @@ Reading another student's run returns `403`.
 | `GET` | `/api/faculty/courses/{course_id}/appeals` | Open and resolved appeals |
 | `POST` | `/api/faculty/appeals/{appeal_id}/resolve` | Uphold or reject an appeal |
 | `POST` | `/api/faculty/assignments/{assignment_id}/regrade` | Bulk regrade under the current approved rubric |
+
+### Creating an assignment
+
+`POST /api/faculty/courses/{course_id}/assignments` requires only
+`faculty_id`, `title`, and `brief`. Everything else is optional, and what is
+left blank determines how the assignment is graded:
+
+```json
+{
+  "faculty_id": "…",
+  "title": "Reverse a linked list",
+  "brief": "Implement a function called reverse(head)\n- Use recursion\n- Handle the empty list\n- Do not use reversed",
+  "reference_solution": "",
+  "rubric": null,
+  "tests": null
+}
+```
+
+- **No `reference_solution`** → `grading_mode: "static"`. No test can be
+  validated, so none is generated and none runs. The rubric is graded from
+  static checks against the code graph, structural evidence, and the report.
+- **A `reference_solution`** → `grading_mode: "executable"`. Tests are
+  generated, each is executed against the reference, failures are discarded,
+  and survivors run on every submission.
+- **No `rubric`** → one is read out of the brief. Every generated item carries a
+  concrete `static_check` and traces back to a phrase the instructor wrote.
+- **`publish: false`** → saved as a draft. Nothing grades until a version is
+  approved.
+
+The response reports `grading_mode`, what was `generated`, any `notes` (for
+example, supplied tests discarded because there was nothing to validate them
+against), and the reference-validation outcome.
+
+Approval is refused — the assignment is saved as a draft instead — when no
+rubric item could ever earn evidence, because that would silently cap every
+student's grade.
+
+The `preview` endpoint takes the same brief and returns the rubric that *would*
+be generated, plus the phrase each item came from, without creating anything.
 
 `queue` entries carry `priority` (escalation severity × contested rubric weight
 × confidence deficit) and `why_this_first` in plain language. The first item

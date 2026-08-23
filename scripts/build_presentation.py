@@ -204,7 +204,7 @@ TEAM = {
     "team_name": "[Team Name as registered on the portal]",
 }
 
-IDEA_TITLE = "EvalPro: Concept-Level Mastery Analytics for Programming Labs"
+IDEA_TITLE = "EvalPro - Programming Labs That Mark Themselves, and Explain Why"
 
 
 def build_title_slide(slide) -> None:
@@ -246,100 +246,107 @@ def build_solution_slide(slide) -> None:
     title = find(slide, "Title 1")
     clear_text(title)
     add_line(
-        title.text_frame, IDEA_TITLE, size=26, bold=True, colour=HEADING_BLUE,
+        title.text_frame, IDEA_TITLE, size=27, bold=True, colour=HEADING_BLUE,
         font=TIMES, first=True, align=PP_ALIGN.LEFT,
     )
-    # The template's team-name oval sits at x 0.36–1.73, so the title starts
+    # The template's team-name oval sits at x 0.36-1.73, so the title starts
     # clear of it rather than running underneath.
-    place(title, 1.88, 0.04, 8.55, 1.08)
+    place(title, 1.88, 0.10, 8.55, 1.00)
 
     box = find(slide, "TextBox 8")
     set_autofit_off(box)
-    place(box, 0.36, 1.24, 12.58, 4.70)
+    place(box, 0.36, 1.26, 12.58, 5.50)
     clear_text(box)
     frame = box.text_frame
 
     add_line(
         frame,
         "Proposed Solution (Describe your Idea/Solution/Prototype)",
-        size=17, bold=True, colour=HEADING_BLUE, underline=True,
-        bullet="v", bullet_font="Wingdings", first=True, after=7,
+        size=20, bold=True, colour=HEADING_BLUE, underline=True,
+        bullet="v", bullet_font="Wingdings", first=True, after=10,
     )
 
     sections = [
         (
             "Detailed explanation of the proposed solution",
             [
-                "Not a grader that reports analytics — an analytics platform whose sensor is an automated grader.",
-                "The spine is a course concept graph (40–80 nodes, prerequisite DAG, ~2 hours to author once, reused every semester). Every rubric item carries concept_ids, so each submission becomes evidence about named competencies.",
-                "A seven-stage cascade grades it: ingest → tree-sitter parse → integrity screen → sandboxed build → sandboxed test → partial credit → confidence gate. Each stage writes evidence; only the gate writes a score.",
-                "Bayesian Knowledge Tracing accumulates that evidence into per-student mastery with explicit uncertainty, propagated down the prerequisite DAG.",
+                "A student submits their lab program. The platform runs it, marks it, and shows them "
+                "exactly why they got each mark.",
+                "It does not stop at a number. Each mark is linked to a topic - loops, recursion, "
+                "error handling - so the student sees which topic they are weak on, not just which lab.",
+                "Marks from every lab add up over the semester into a clear picture of what each "
+                "student actually understands.",
             ],
         ),
         (
             "How it addresses the problem",
             [
-                "Collect academic information — LTI 1.3 roster and SIS sync, course outcomes, submissions, reports, gradebook writeback.",
-                "Analyse student and course data — per submission, per student longitudinally, per rubric item (classical psychometrics), and per cohort.",
-                "Actionable insights — prerequisite-walk remediation for students, re-teach signals ranked by downstream impact for faculty, early warning routed to support for administrators.",
-                "Simple interface — one landing question per role: what should I work on / what should I teach / where is this programme weak.",
+                "Collects the academic information: labs, submissions and class lists, straight from "
+                "the college's existing Moodle or Google Classroom.",
+                "Analyses it four ways: each submission, each student over time, each question, and "
+                "the class as a whole.",
+                "Gives everyone a next step: what a student should revise, what a teacher should "
+                "explain again, which students need support.",
+                "Shows it on one simple screen per person - one for students, one for teachers, one "
+                "for the department.",
             ],
         ),
         (
             "Innovation and uniqueness of the solution",
             [
-                "Partial credit by repair distance: the smallest edit that makes the code compile. A missing colon costs two marks, not a hundred percent of them.",
-                "The test oracle never enters the sandbox — student code cannot hardcode an answer it was never given.",
-                "Item analysis grades the assessment, not just the student: negative discrimination exposes an ambiguous spec before sixty students hit it.",
-                "Abstain rather than guess — a tunable auto-release dial, and an integrity screen that reports cohort-relative outliers as evidence, never as a verdict.",
-                "CO–PO attainment computed live from real performance evidence, not reconstructed from a spreadsheet.",
+                "A missing bracket costs two marks, not the whole lab. We find the smallest fix that "
+                "makes the program run, then mark the rest of the work properly.",
+                "The answer key never goes near the student's program, so it cannot be copied, "
+                "guessed or hard-coded.",
+                "It also marks the question paper. If the strongest students all fail one part, the "
+                "question was probably unclear, and the teacher is told.",
+                "When it is not sure, it says so and hands the submission to the teacher instead of "
+                "guessing.",
             ],
         ),
     ]
-    _render_sections(frame, sections, heading_size=14.5, body_size=11.5)
-
-    metric_strip(slide, [
-        ("91", "submissions graded end to end by the real cascade, in the real sandbox"),
-        ("24", "concepts tracked per student, mapped to 5 course outcomes"),
-        ("0.9 s", "p95 latency for the whole seven-stage cascade, per submission"),
-        ("13", "isolation layers specified; the test oracle never enters the guest"),
-    ])
+    _render_sections(frame, sections, heading_size=17, body_size=14)
 
 
 def build_technical_slide(slide) -> None:
     box = find(slide, "TextBox 8")
     set_autofit_off(box)
-    place(box, 0.36, 3.26, 12.58, 3.52)
+    place(box, 0.36, 3.62, 12.58, 3.20)
     clear_text(box)
     frame = box.text_frame
 
     add_line(
         frame,
         "Technologies to be used (e.g. programming languages, frameworks, hardware)",
-        size=14, bold=True, colour=HEADING_BLUE, underline=True,
-        bullet="v", bullet_font="Wingdings", first=True, after=4,
+        size=16, bold=True, colour=HEADING_BLUE, underline=True,
+        bullet="v", bullet_font="Wingdings", first=True, after=5,
     )
     for text in [
-        "Backend — Python 3.12, FastAPI, SQLAlchemy, PostgreSQL (SQLite for the pilot). Build-free ES-module front end with hand-authored SVG, so a deployment needs no toolchain.",
-        "Analysis — tree-sitter (40+ grammars, error-tolerant), winnowing fingerprints (MOSS), pq-gram/APTED tree edit distance, Bayesian Knowledge Tracing, HDBSCAN, point-biserial item analysis.",
-        "Models — gradient boosting for language ID, confidence estimation and risk; graph embeddings for structural clones; a fine-tuned DeBERTa-v3 encoder for report–code entailment. The LLM drafts rubrics once per assignment and never grades a submission.",
-        "Isolation — Firecracker microVM, seccomp-bpf allowlist, cgroups v2, empty network namespace, one-shot instances, supervisor-enforced wall clock.",
-        "Integration — LTI 1.3 tool provider with Assignment and Grade Services writeback (Moodle, Canvas, Google Classroom).",
+        "Python and FastAPI on the server. A plain web interface that works in any browser, with "
+        "nothing to install on a student's machine.",
+        "Student programs run inside a locked-down sandbox, so nothing they submit can touch the "
+        "college's systems or see anyone else's work.",
+        "Well-established methods do the marking: standard program analysis, the same plagiarism "
+        "technique universities already use, and a well-known model for tracking what a learner knows.",
+        "Runs on an ordinary computer. No expensive hardware, no paid AI service needed to mark a "
+        "submission.",
     ]:
-        add_line(frame, text, size=11, bullet="•", indent=0.12, spacing=0.95, after=2,
+        add_line(frame, text, size=13.5, bullet="•", indent=0.12, spacing=0.95, after=3,
                  align=PP_ALIGN.JUSTIFY)
 
     add_line(
         frame,
         "Methodology and process for implementation (Flow Charts/Images/ working prototype)",
-        size=14, bold=True, colour=HEADING_BLUE, underline=True,
-        bullet="v", bullet_font="Wingdings", before=8, after=4,
+        size=16, bold=True, colour=HEADING_BLUE, underline=True,
+        bullet="v", bullet_font="Wingdings", before=10, after=5,
     )
     for text in [
-        "Working prototype: the four layers above run today. A 24-student cohort across four labs — 91 submissions — is graded end to end by the real cascade in a real sandbox in under 90 seconds on a laptop; p95 latency is 0.9 s per submission.",
-        "Phase 1 trustworthy execution → Phase 2 partial credit and authoring → Phase 3 accumulation → Phase 4 action → Phase 5 semantic depth. Each phase ships something separately useful.",
+        "The teacher writes the lab question in ordinary English. The platform reads it and works "
+        "out what it can check - and shows the teacher that list before anything is published.",
+        "Working prototype today: a full class of 24 students across four labs, marked from start "
+        "to finish, with every screen above already built.",
     ]:
-        add_line(frame, text, size=11, bullet="•", indent=0.12, spacing=0.95, after=2,
+        add_line(frame, text, size=13.5, bullet="•", indent=0.12, spacing=0.95, after=3,
                  align=PP_ALIGN.JUSTIFY)
 
     _draw_architecture(slide)
@@ -348,7 +355,7 @@ def build_technical_slide(slide) -> None:
 def build_feasibility_slide(slide) -> None:
     box = find(slide, "TextBox 8")
     set_autofit_off(box)
-    place(box, 0.36, 1.24, 12.58, 4.70)
+    place(box, 0.36, 1.26, 12.58, 4.66)
     clear_text(box)
     frame = box.text_frame
 
@@ -356,49 +363,48 @@ def build_feasibility_slide(slide) -> None:
         (
             "Analysis of the feasibility of the idea",
             [
-                "Every component is proven technology in isolation; the contribution is the concept-graph spine that connects them. Nothing here needs a research breakthrough.",
-                "The prototype already grades a full cohort end to end on commodity hardware — no GPU, no paid API on the critical path, no network access inside the sandbox.",
-                "The highest-cost input is roughly two hours of instructor time to author the concept graph once per course. Every insight in the platform traces back to it, and it is reused every semester.",
-                "Queue-backed autoscaling workers absorb the spike at a deadline, which is where naive designs fall over.",
+                "It already works. Nothing here waits on a research breakthrough.",
+                "It runs on a normal laptop or a small college server, and setting up one lab takes "
+                "a teacher about ten minutes.",
+                "It fits into the tools a college already uses, so marks go back into the existing "
+                "gradebook automatically.",
             ],
         ),
         (
             "Potential challenges and risks",
             [
-                "Executing untrusted code written by capable people, at scale, on a deadline.",
-                "An LLM hallucinating an expected output and silently penalising a whole cohort.",
-                "Cold start: no labelled data in semester zero.",
-                "False plagiarism accusations — the highest-consequence error the system can make.",
-                "Faculty adoption: a tool that costs more time than it saves is abandoned regardless of model quality.",
-                "Demographic bias in the early-warning model.",
+                "Student programs are run on our machine, and some of them will be badly behaved.",
+                "Automatic marking can get things wrong, and a wrong mark destroys trust quickly.",
+                "Wrongly accusing a student of copying is the most damaging mistake the system could make.",
+                "Teachers will abandon anything that costs them more time than it saves.",
             ],
         ),
         (
             "Strategies for overcoming these challenges",
             [
-                "Defence in depth: thirteen isolation layers, one-shot instances, workers holding nothing worth stealing, and the oracle kept outside the guest.",
-                "Every generated test executes against the instructor's reference solution before admission; more than ~20% failing halts authoring and flags the brief as ambiguous.",
-                "Unsupervised models (clustering, knowledge tracing) ship on day one; the LLM is a teacher that drafts and bootstraps, not a grader. Per-submission LLM cost trends to zero.",
-                "Base-code and common-idiom exclusion plus cohort-relative outlier detection; similarity is surfaced as ranked evidence with aligned regions, and faculty decide.",
-                "A ten-minute authoring budget and gradebook writeback so faculty never maintain two gradebooks; every override is captured as training data.",
-                "A demographic bias audit that blocks deployment when flag rates differ by more than 5% across any protected group, re-run every semester.",
+                "Every program runs sealed off from everything else, and is thrown away afterwards.",
+                "The system knows when it is unsure and sends those submissions to the teacher. "
+                "Students can question any mark and get a human answer.",
+                "For copying, it only shows the overlapping lines side by side. The judgement stays "
+                "with the teacher - the platform never accuses anyone.",
+                "Set-up is ten minutes, marks flow back into the existing gradebook, and every "
+                "correction a teacher makes teaches the system to do better next time.",
             ],
         ),
     ]
-    _render_sections(frame, sections, heading_size=14.5, body_size=11)
+    _render_sections(frame, sections, heading_size=17, body_size=14)
 
     metric_strip(slide, [
-        ("< 90 s", "to grade a 24-student, four-lab cohort end to end on a laptop"),
-        ("0", "GPUs, paid API calls, or network access needed at grading time"),
-        ("~2 h", "of instructor time to author the concept graph, once per course"),
-        ("> 20 %", "reference-test failure halts authoring and flags an ambiguous brief"),
+        ("Already built", "a full class of 24 students and four labs, marked end to end"),
+        ("~10 minutes", "for a teacher to set up one lab"),
+        ("No extra cost", "runs on ordinary hardware, no paid AI service to mark work"),
     ])
 
 
 def build_impact_slide(slide) -> None:
     box = find(slide, "TextBox 8")
     set_autofit_off(box)
-    place(box, 0.36, 1.24, 12.58, 4.70)
+    place(box, 0.36, 1.26, 12.58, 5.50)
     clear_text(box)
     frame = box.text_frame
 
@@ -406,78 +412,76 @@ def build_impact_slide(slide) -> None:
         (
             "Potential impact on the target audience",
             [
-                "Students — feedback that is evidence rather than a number: \"Empty-input handling 0/8. Test 11 crashed with IndexError at solution.py:14. No length guard found on the input path.\" A ranked next action with the reason, and one-click appeal on any rubric item.",
-                "Faculty — a course-health landing view that answers what to re-teach, ranked by how many later concepts depend on it, plus alerts for rubric items that are measuring nothing.",
-                "Administrators — live CO–PO attainment with per-student traceability down to individual submissions, and an at-risk view that routes to advising rather than to sanction.",
+                "Students stop guessing why they lost marks. Instead of \"72/100\" they see \"your "
+                "program crashes when the list is empty\" - and which topic to revise because of it.",
+                "Teachers get their marking hours back, and get told what the class did not "
+                "understand while there is still time to teach it again.",
+                "Heads of department see how the course is performing against its stated outcomes, "
+                "live, instead of reconstructing it at the end of the year.",
             ],
         ),
         (
             "Benefits of the solution (social, economic, environmental, etc.)",
             [
-                "Social — grading a student can interrogate, contest, and understand. A missing delimiter stops being worth a hundred percent of the marks. Early warning is a support route by design, and its bias audit is mandatory.",
-                "Academic — a misconception library and a mastery model that persist across semesters, so what a cohort got wrong in 2026 informs how the topic is taught in 2027.",
-                "Economic — faculty minutes per assignment fall semester over semester as auto-release coverage rises; NBA/NAAC attainment reporting collapses from weeks of manual work into a live view.",
-                "Operational — deterministic-first design means most of the pipeline is a parser and a test runner, so it runs on ordinary institutional hardware with no GPU and no per-submission API spend.",
-                "Equity — mastery is inferred from evidence the student generated, disclosed to them, and auditable; protected attributes are used only to audit the model, never as features.",
+                "Fairer marking. Every student is marked to the same standard, every mark comes with "
+                "a reason, and any student can question any mark.",
+                "Time and cost saved. Marking a lab of sixty students goes from an evening's work to "
+                "reviewing the handful the system was unsure about.",
+                "Accreditation reporting for NBA and NAAC, which takes weeks of manual work today, "
+                "becomes a report that is always up to date.",
+                "Weaker students are spotted early and offered help, rather than discovered at the "
+                "end of the semester when nothing can be done.",
             ],
         ),
     ]
-    _render_sections(frame, sections, heading_size=14.5, body_size=12)
-
-    # Published targets, not claims: the platform reports itself against these
-    # every semester, including when it misses them.
-    metric_strip(slide, [
-        ("70 %", "auto-release coverage target by semester 2, at under 3% override rate"),
-        ("< 3 min", "p95 feedback latency target - feedback loses pedagogical value fast"),
-        ("3 weeks", "early-warning lead time before failure, routed to support"),
-        ("< 5 %", "maximum early-warning flag-rate gap across any protected group"),
-    ])
+    _render_sections(frame, sections, heading_size=17, body_size=15)
 
 
 def build_references_slide(slide) -> None:
     box = find(slide, "TextBox 8")
     set_autofit_off(box)
-    place(box, 0.36, 1.24, 12.58, 4.70)
+    place(box, 0.36, 1.26, 12.58, 4.66)
     clear_text(box)
     frame = box.text_frame
 
     add_line(
         frame, "Details / Links of the reference and research work",
-        size=15, bold=True, colour=HEADING_BLUE, underline=True,
-        bullet="v", bullet_font="Wingdings", after=7,
+        size=17, bold=True, colour=HEADING_BLUE, underline=True,
+        bullet="v", bullet_font="Wingdings", after=9,
     )
 
     groups = [
-        ("Integrity and code similarity", [
-            "Schleimer, Wilkerson & Aiken — \"Winnowing: Local Algorithms for Document Fingerprinting\", ACM SIGMOD 2003 (the MOSS algorithm).",
-            "Ragkhitwetsagul, Krinke & Clark — \"A comparison of code similarity analysers\", Empirical Software Engineering, 2018.",
+        ("Checking for copied code", [
+            "Schleimer, Wilkerson & Aiken, \"Winnowing: Local Algorithms for Document "
+            "Fingerprinting\", ACM SIGMOD 2003 - the method behind MOSS, used by universities "
+            "worldwide.",
         ]),
-        ("Knowledge tracing and learning analytics", [
-            "Corbett & Anderson — \"Knowledge Tracing: Modeling the Acquisition of Procedural Knowledge\", User Modeling and User-Adapted Interaction, 1994.",
-            "Pardos & Heffernan — \"Modeling Individualization in a Bayesian Networks Implementation of Knowledge Tracing\", UMAP 2010.",
-            "Ebel & Frisbie — Essentials of Educational Measurement (item difficulty, point-biserial discrimination).",
+        ("Tracking what a student knows", [
+            "Corbett & Anderson, \"Knowledge Tracing\", User Modeling and User-Adapted Interaction, "
+            "1994 - the standard model for estimating mastery from performance.",
+            "Ebel & Frisbie, Essentials of Educational Measurement - the classical way to tell a "
+            "good exam question from a bad one.",
         ]),
-        ("Program analysis and partial credit", [
-            "Pawlik & Augsten — \"Tree edit distance: Robust and memory-efficient\" (APTED), Information Systems, 2016.",
-            "Gulwani, Radiček & Zuleger — \"Automated Clustering and Program Repair for Introductory Programming Assignments\", PLDI 2018.",
-            "tree-sitter — incremental, error-tolerant parsing library, https://tree-sitter.github.io",
+        ("Marking programs automatically", [
+            "Gulwani, Radicek & Zuleger, \"Automated Clustering and Program Repair for Introductory "
+            "Programming Assignments\", PLDI 2018 - the basis for giving partial credit instead of "
+            "a zero.",
+            "tree-sitter - the parser used to understand student code even when it does not compile.",
         ]),
-        ("Clustering, NLI, and sandboxing", [
-            "Campello, Moulavi & Sander — \"Density-Based Clustering Based on Hierarchical Density Estimates\" (HDBSCAN), PAKDD 2013.",
-            "He, Gao & Chen — \"DeBERTaV3: Improving DeBERTa using ELECTRA-Style Pre-Training\", ICLR 2023.",
-            "Agache et al. — \"Firecracker: Lightweight Virtualization for Serverless Applications\", USENIX NSDI 2020.",
+        ("Running untrusted code safely", [
+            "Agache et al., \"Firecracker: Lightweight Virtualization\", USENIX NSDI 2020.",
         ]),
-        ("Standards and institutional context", [
-            "1EdTech (IMS Global) — Learning Tools Interoperability 1.3 and Assignment and Grade Services, https://www.imsglobal.org/spec/lti/v1p3",
-            "National Board of Accreditation, India — CO–PO attainment guidelines for UG engineering programmes.",
-            "Digital Personal Data Protection Act, 2023 (India) — treatment of inferred attributes as personal data.",
+        ("Standards we build to", [
+            "1EdTech Learning Tools Interoperability 1.3 - how the platform plugs into Moodle and "
+            "Google Classroom.",
+            "National Board of Accreditation (India) - the CO-PO attainment rules the reports follow.",
         ]),
     ]
     for heading, entries in groups:
-        add_line(frame, heading, size=12, bold=True, colour=ACCENT_BLUE,
-                 bullet="•", indent=0.0, spacing=0.95, before=3, after=1)
+        add_line(frame, heading, size=14, bold=True, colour=ACCENT_BLUE,
+                 bullet="•", indent=0.0, spacing=0.95, before=5, after=2)
         for entry in entries:
-            add_line(frame, entry, size=10, bullet="–", indent=0.30, spacing=0.95, after=1)
+            add_line(frame, entry, size=12.5, bullet="–", indent=0.30, spacing=0.95, after=3)
     drop_empty_paragraphs(frame)
 
     footer = slide.shapes.add_textbox(Inches(0.34), Inches(6.08), Inches(12.66), Inches(0.62))
@@ -490,14 +494,9 @@ def build_references_slide(slide) -> None:
     footer.text_frame.vertical_anchor = MSO_ANCHOR.MIDDLE
     add_line(
         footer.text_frame,
-        "Working prototype and full architecture specification: github.com/Varshith-06/evalpro",
-        size=12, bold=True, colour=LAYER_FILL, bullet=None, align=PP_ALIGN.CENTER, first=True, spacing=0.95,
-    )
-    add_line(
-        footer.text_frame,
-        "The demo course builds itself on first run - every score, mastery estimate and attainment figure "
-        "in it is produced by the real cascade, not seeded.",
-        size=9, colour=BODY_BLACK, bullet=None, align=PP_ALIGN.CENTER, spacing=0.92,
+        "Working prototype and source code: github.com/Varshith-06/evalpro",
+        size=13, bold=True, colour=LAYER_FILL, bullet=None, align=PP_ALIGN.CENTER,
+        first=True, spacing=0.95,
     )
 
 
@@ -509,8 +508,9 @@ def metric_strip(slide, items: list[tuple[str, str]], top: float = 6.02, height:
     read on their own.
     """
     left = Inches(0.34)
-    width = Inches(2.98)
-    gap = Inches(0.22)
+    count = max(1, len(items))
+    gap = Inches(0.24)
+    width = Emu(int((Inches(12.66) - gap * (count - 1)) / count))
     for index, (figure, caption) in enumerate(items):
         x = Emu(int(left) + index * (int(width) + int(gap)))
         box = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, x, Inches(top), width, Inches(height))
@@ -524,9 +524,9 @@ def metric_strip(slide, items: list[tuple[str, str]], top: float = 6.02, height:
         frame = box.text_frame
         frame.word_wrap = True
         frame.vertical_anchor = MSO_ANCHOR.MIDDLE
-        add_line(frame, figure, size=15, bold=True, colour=LAYER_FILL, bullet=None,
+        add_line(frame, figure, size=16, bold=True, colour=LAYER_FILL, bullet=None,
                  align=PP_ALIGN.CENTER, first=True, spacing=0.9)
-        add_line(frame, caption, size=8, colour=BODY_BLACK, bullet=None,
+        add_line(frame, caption, size=10, colour=BODY_BLACK, bullet=None,
                  align=PP_ALIGN.CENTER, spacing=0.88)
 
 
@@ -549,16 +549,16 @@ def _render_sections(frame, sections, heading_size: float, body_size: float) -> 
 # Architecture diagram, drawn as native shapes
 # ==========================================================================
 LAYERS = [
-    ("L0  INSTITUTIONAL CONTEXT", "LTI 1.3 / SIS sync\nroster · course outcomes\nconcept graph"),
-    ("L1  SENSING", "authoring → cascade\nsandbox → gate\nper-rubric-item evidence"),
-    ("L2  ACCUMULATION", "knowledge tracing\nitem analysis\nmisconception clusters"),
-    ("L3  ACTION", "remediation · re-teach\nearly warning\nCO–PO attainment"),
+    ("1.  COLLECT", "lab questions, submissions\nand class lists, from the\ncollege's existing system"),
+    ("2.  MARK", "run the program safely,\ncheck it against the rubric,\nexplain every mark"),
+    ("3.  UNDERSTAND", "build a picture of which\ntopics each student\nhas actually got"),
+    ("4.  ACT", "tell students what to revise,\ntell teachers what to reteach,\nreport on the course"),
 ]
 
 
 def _draw_architecture(slide) -> None:
     top = Inches(1.22)
-    height = Inches(1.50)
+    height = Inches(1.62)
     left = Inches(0.36)
     width = Inches(2.86)
     gap = Inches(0.32)
@@ -600,9 +600,9 @@ def _draw_architecture(slide) -> None:
     clear_text(caption)
     add_line(
         caption.text_frame,
-        "The single field that connects L1 to L2 is RubricItem.concept_ids — without it you have twelve "
-        "disconnected gradebooks; with it, every submission is evidence about a named competency.",
-        size=9, bold=True, colour=HEADING_BLUE, bullet=None, first=True,
+        "Every mark is tied to a topic. That one link is what turns a pile of lab marks into a picture "
+        "of what a student actually understands.",
+        size=11, bold=True, colour=HEADING_BLUE, bullet=None, first=True,
         align=PP_ALIGN.CENTER, spacing=0.95,
     )
 

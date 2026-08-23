@@ -47,7 +47,7 @@ export function masteryMap(nodes, edges, { width = 900, onSelect = null } = {}) 
       const midX = (from.x + to.x) / 2;
       const gap = to.node.prerequisite_gap || from.node.prerequisite_gap;
       return `<path d="M${from.x + 34} ${from.y} C ${midX} ${from.y}, ${midX} ${to.y}, ${to.x - 34} ${to.y}"
-        fill="none" stroke="${gap ? "rgba(248,81,73,.45)" : "rgba(38,48,61,.9)"}" stroke-width="${gap ? 1.6 : 1}" />`;
+        fill="none" stroke="${gap ? "rgba(180,35,42,.5)" : "rgba(200,207,216,.9)"}" stroke-width="${gap ? 1.6 : 1}" />`;
     })
     .join("");
 
@@ -62,7 +62,7 @@ export function masteryMap(nodes, edges, { width = 900, onSelect = null } = {}) 
         <rect x="${x - 36}" y="${y - 15}" width="72" height="30" rx="7"
               fill="${fill}" stroke="${stroke}" stroke-width="${node.prerequisite_gap ? 1.6 : 1}" />
         <text x="${x}" y="${y + 4}" text-anchor="middle" font-size="11" font-weight="600"
-              fill="${node.mastery > 0.55 ? "#0d1117" : "var(--text)"}">${value}</text>
+              fill="var(--text)">${value}</text>
         <text x="${x}" y="${y + 26}" text-anchor="middle" class="node-label">${esc(label)}</text>
       </g>`;
     })
@@ -127,10 +127,10 @@ export function heatmap(concepts, rows, { onCell = null } = {}) {
       const cells = row.cells
         .map((c, index) => {
           const x = labelWidth + index * (cell + gap);
-          const fill = c.mastery === null ? "var(--bg-inset)" : masteryColour(c.mastery, c.uncertainty);
+          const fill = c.mastery === null ? "#f1f3f6" : masteryColour(c.mastery, c.uncertainty);
           return `<rect class="heat-cell" data-student="${esc(row.student_id)}" data-concept="${esc(c.concept)}"
             x="${x}" y="${y}" width="${cell}" height="${cell}" rx="3" fill="${fill}"
-            stroke="var(--border-soft)" stroke-width=".5">
+            stroke="var(--border)" stroke-width=".5">
             <title>${esc(row.student_name)} — ${esc(c.concept)}: ${
               c.mastery === null ? "no evidence" : `${pct(c.mastery)} (uncertainty ${pct(c.uncertainty)})`
             }</title></rect>`;
@@ -161,7 +161,7 @@ export function trajectory(series, { width = 560, height = 150 } = {}) {
   const padding = { top: 12, right: 12, bottom: 22, left: 30 };
   const innerW = width - padding.left - padding.right;
   const innerH = height - padding.top - padding.bottom;
-  const palette = ["#4f9cf9", "#a371f7", "#3fb950", "#d29922", "#f85149", "#39c5cf"];
+  const palette = ["#2563eb", "#6b3fc4", "#157f3d", "#a05e00", "#b4232a", "#0e7490"];
 
   const maxPoints = Math.max(...series.map((s) => s.points.length), 2);
   const xFor = (i) => padding.left + (i / (maxPoints - 1)) * innerW;
@@ -171,7 +171,7 @@ export function trajectory(series, { width = 560, height = 150 } = {}) {
     .map(
       (v) =>
         `<line x1="${padding.left}" x2="${width - padding.right}" y1="${yFor(v)}" y2="${yFor(v)}"
-          stroke="${v === 0.7 ? "rgba(63,185,80,.32)" : "var(--border-soft)"}"
+          stroke="${v === 0.7 ? "rgba(21,127,61,.35)" : "var(--border)"}"
           stroke-dasharray="${v === 0.7 ? "4 3" : "0"}" stroke-width="1" />
         <text x="2" y="${yFor(v) + 3}" class="axis-label">${(v * 100).toFixed(0)}</text>`,
     )
