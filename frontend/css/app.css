@@ -71,6 +71,21 @@ a:hover { text-decoration: underline; }
 .who select:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
 .who + .who { padding-top: 6px; }
 
+/* Role is the first thing you pick, so it is a visible control rather than an
+   option buried in a dropdown. "Where is the New assignment button" is answered
+   by making it obvious you are currently looking at the app as a student. */
+.roles { display: flex; gap: 3px; background: var(--surface-2); border-radius: 7px; padding: 3px; }
+.roles button {
+  flex: 1; border: 0; background: none; cursor: pointer;
+  font: inherit; font-size: 12px; color: var(--text-2);
+  padding: 5px 4px; border-radius: 5px;
+}
+.roles button:hover { color: var(--text); }
+.roles button.active {
+  background: var(--surface); color: var(--accent); font-weight: 600;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .08);
+}
+
 nav.menu { padding: 10px 8px; flex: 1; overflow-y: auto; }
 nav.menu .group {
   font-size: 10px; text-transform: uppercase; letter-spacing: .07em;

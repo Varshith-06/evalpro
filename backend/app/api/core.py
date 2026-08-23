@@ -5,13 +5,13 @@ routers, each answering exactly one question.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..db import get_session
-from ..engine.b0_ingest import IngestError
+from ..engine.b0_ingest import IngestError, ingest_archive, ingest_files
 from ..engine.sandbox import describe_isolation
 from ..models import (
     Assignment,
@@ -331,6 +331,56 @@ def submit(payload: SubmitRequest, session: Session = Depends(get_session)) -> d
         "run_id": run.id,
         "from_cache": from_cache,
         "visible_only": run.visible_only,
+        "detail": grading_service.run_detail(session, run.id),
+    }
+
+
+@router.post("/submit/upload")
+async def submit_upload(
+    assignment_id: str = Form(...),
+    student_id: str = Form(...),
+    report_text: str = Form(""),
+    force_full_run: bool = Form(False),
+    file: UploadFile = File(...),
+    session: Session = Depends(get_session),
+) -> dict:
+    """Submit by uploading a file instead of pasting code.
+
+    A ``.zip`` goes through the same B0 limits as everything else - entry
+    count, uncompressed size, nesting depth, compression ratio, and entry-name
+    validation - because an upload form is exactly where a decompression bomb
+    arrives. A single source file is accepted directly.
+    """
+    blob = await file.read()
+    name = (file.filename or "solution.py").replace("\\", "/").split("/")[-1]
+
+    try:
+        if name.lower().endswith(".zip") or blob[:2] == b"PK":
+            ingested = ingest_archive(blob)
+            files, report = ingested.files, ingested.report_text
+        else:
+            try:
+                text = blob.decode("utf-8")
+            except UnicodeDecodeError:
+                raise HTTPException(400, "That file is not text. Upload source code or a .zip.")
+            ingested = ingest_files({name: text})
+            files, report = ingested.files, ingested.report_text
+    except IngestError as exc:
+        raise HTTPException(400, f"Upload rejected: {exc}") from exc
+
+    try:
+        attempt, run, from_cache = grading_service.submit(
+            session, assignment_id, student_id, files,
+            report_text or report, visible_only=False if force_full_run else None,
+        )
+    except grading_service.SubmissionRejected as exc:
+        raise HTTPException(429 if "Rate limit" in str(exc) else 409, str(exc)) from exc
+    session.commit()
+    return {
+        "attempt_id": attempt.id,
+        "run_id": run.id,
+        "from_cache": from_cache,
+        "files": sorted(files),
         "detail": grading_service.run_detail(session, run.id),
     }
 

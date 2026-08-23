@@ -6,19 +6,9 @@ observations, mastery, and a role-scoped view at the other.
 """
 from __future__ import annotations
 
-import os
-import tempfile
-from pathlib import Path
-
 import pytest
 
-# A dedicated database and artifact directory per test session, configured
-# before any application module is imported.
-_TMP = Path(tempfile.mkdtemp(prefix="evalpro-tests-"))
-os.environ["EVALPRO_VAR"] = str(_TMP)
-os.environ["EVALPRO_DATABASE_URL"] = f"sqlite:///{_TMP / 'test.db'}"
-os.environ["EVALPRO_DEMO"] = "0"
-
+# The database lives in a fresh temporary directory; see tests/conftest.py.
 from fastapi.testclient import TestClient  # noqa: E402
 
 from app.db import init_db, session_scope  # noqa: E402
@@ -38,7 +28,10 @@ def client():
 
 @pytest.fixture(scope="module")
 def course(client):
-    return client.get("/api/courses").json()[0]
+    # Select by code, not by index: other test modules create their own courses
+    # in the same database, so "the first course" is not stable.
+    courses = client.get("/api/courses").json()
+    return next(c for c in courses if c["code"] == "CS201")
 
 
 def test_course_listing(course):

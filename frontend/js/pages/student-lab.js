@@ -51,6 +51,8 @@ export async function render(root, ctx, assignmentId) {
           }
           <div class="actions" style="margin-top:14px">
             <button class="btn primary" id="submit">Submit</button>
+            <button class="btn" id="pick">Upload a file instead</button>
+            <input type="file" id="upload" accept=".py,.txt,.zip,.md" hidden />
             <span class="faint small" id="submit-note" style="align-self:center"></span>
           </div>
         </div>
@@ -88,6 +90,36 @@ export async function render(root, ctx, assignmentId) {
       toast(error.message, "bad");
       button.disabled = false;
       button.textContent = "Submit";
+      root.querySelector("#submit-note").textContent = "";
+    }
+  });
+
+  // Uploading a .py drops it into the editor so the student can see what they
+  // are about to hand in. A .zip goes straight through, since there is nothing
+  // meaningful to show in a single text box.
+  const picker = root.querySelector("#upload");
+  root.querySelector("#pick").addEventListener("click", () => picker.click());
+  picker.addEventListener("change", async () => {
+    const file = picker.files?.[0];
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith(".zip")) {
+      root.querySelector("#code").value = await file.text();
+      root.querySelector("#submit-note").textContent = `Loaded ${file.name}. Check it, then submit.`;
+      return;
+    }
+    const form = new FormData();
+    form.append("assignment_id", assignmentId);
+    form.append("student_id", ctx.userId);
+    form.append("file", file);
+    root.querySelector("#submit-note").textContent = "Unpacking and marking…";
+    try {
+      const response = await fetch("/api/submit/upload", { method: "POST", body: form });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.detail || "Upload failed");
+      toast(`Submitted ${body.files.length} file(s).`);
+      window.location.hash = `#/s/feedback/${body.run_id}`;
+    } catch (error) {
+      toast(error.message, "bad");
       root.querySelector("#submit-note").textContent = "";
     }
   });

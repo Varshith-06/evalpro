@@ -148,7 +148,11 @@ backend. An operator should never have to guess how contained the grader is.
 
 ## The interface
 
-One screen per task, with a sidebar that changes by role. Sign in as anyone on
+One screen per task, with a sidebar that changes by role.
+
+**The app opens as a student.** Use the **VIEW AS · Student / Faculty / Admin**
+switch at the top of the sidebar to change role — that is where *New assignment*
+and the review queue live. Sign in as anyone on
 the roster from the top-left picker, or deep-link with `?as=faculty`.
 
 | Role | Screens |
@@ -176,7 +180,13 @@ rest — or works around it.
 
 The **New assignment** screen previews the rubric it read out of your brief
 before anything is created, and every generated item traces back to a phrase
-you wrote.
+you wrote. Afterwards the criteria are editable from the assignment page.
+
+**Editing an approved rubric creates a new version rather than changing the old
+one.** Every run pins the version it was marked against, so a student who
+already has a mark keeps the criteria they were marked against until you
+deliberately re-mark them — which is the only way "regrade this next year and
+get the same answer" stays true.
 
 Two rules the authoring flow will not bend on:
 

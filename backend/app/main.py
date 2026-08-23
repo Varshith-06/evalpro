@@ -31,12 +31,25 @@ async def lifespan(app: FastAPI):
     init_db()
     logger.info("EvalPro %s ready (pipeline %s)", __version__, PIPELINE_VERSION)
     if settings.demo_mode:
-        from .seed import ensure_seeded
+        from .seed import already_seeded, seed_all
 
         with session_scope() as session:
-            summary = ensure_seeded(session)
-        if summary:
-            logger.info("Demo data: %s", summary)
+            if not already_seeded(session):
+                # First run grades a whole cohort through the real cascade, which
+                # takes over a minute. Say so, and keep saying so: a silent
+                # console for ninety seconds looks like a hang.
+                logger.info(
+                    "First run: building the demo course by marking ~90 submissions through the "
+                    "real pipeline. This takes about 80 seconds and only happens once."
+                )
+                seen: set[str] = set()
+
+                def progress(code: str, _student: str, _state: str) -> None:
+                    if code not in seen:
+                        seen.add(code)
+                        logger.info("  marking %s...", code)
+
+                logger.info("Demo data: %s", seed_all(session, progress=progress))
     yield
 
 
@@ -74,9 +87,26 @@ async def ingest_error_handler(_request, exc: IngestError):
 if FRONTEND_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
 
+    # The front end is plain files with no build step and no content hashing, so
+    # a browser that caches app.js will happily keep running last week's UI
+    # after the server has been updated - and the only symptom is that a feature
+    # someone was told about is not there. These files are a few kilobytes;
+    # revalidating them every time costs nothing and removes a whole class of
+    # "it works on my machine" confusion.
+    @app.middleware("http")
+    async def no_store_for_the_app_shell(request, call_next):
+        response = await call_next(request)
+        path = request.url.path
+        if path == "/" or path.startswith("/static/"):
+            response.headers["Cache-Control"] = "no-store, must-revalidate"
+        return response
+
     @app.get("/", include_in_schema=False)
     def index() -> FileResponse:
-        return FileResponse(str(FRONTEND_DIR / "index.html"))
+        return FileResponse(
+            str(FRONTEND_DIR / "index.html"),
+            headers={"Cache-Control": "no-store, must-revalidate"},
+        )
 
 
 def main() -> None:

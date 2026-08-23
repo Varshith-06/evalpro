@@ -751,6 +751,235 @@ def create_assignment(
     return result
 
 
+@dataclass
+class AmendResult:
+    version: AssignmentVersion
+    edits: list[dict]
+    repairs: list[str]
+    created_new_version: bool
+    message: str
+
+
+def amend_rubric(
+    session: Session,
+    version: AssignmentVersion,
+    faculty_id: str,
+    items: list[dict],
+    note: str = "",
+) -> AmendResult:
+    """Replace a version's rubric with ``items``, recording what changed.
+
+    **Editing an approved rubric creates a new version rather than mutating the
+    old one.** Every past run pins the version it was graded against, and
+    "regrade this a year later and get the same result" is only true if that
+    version never changes underneath it. So a student who already has a mark
+    keeps the rubric they were marked against until somebody deliberately
+    regrades them onto the new one.
+
+    An unapproved draft is edited in place -- nothing has been graded against
+    it, so there is nothing to preserve.
+
+    The diff itself is the point of recording it: which items faculty deleted,
+    reweighted or re-tagged is exactly the supervision the drafting model needs.
+    """
+    current = {
+        item.item_key: item
+        for item in session.scalars(select(RubricItem).where(RubricItem.version_id == version.id))
+    }
+    incoming = _rubric_from_payload(items)
+    if not incoming:
+        raise ValueError("A rubric needs at least one criterion.")
+
+    concepts = {
+        c.concept_key
+        for c in session.scalars(
+            select(Concept).where(
+                Concept.course_id
+                == session.get(Assignment, version.assignment_id).course_id
+            )
+        )
+    }
+    repairs = validate_rubric_draft(incoming, concepts)
+
+    # In approach-graded mode no test exists, so an item may not ask for one.
+    if version.grading_mode != "executable":
+        for item in incoming:
+            if "test" in item.checkable_by:
+                item.checkable_by = [c for c in item.checkable_by if c != "test"] or ["structural"]
+                item.test_ids = []
+                repairs.append(
+                    f"{item.item_key}: dropped the test requirement - this assignment has no "
+                    "reference solution, so no test can exist"
+                )
+
+    _assert_gradeable(incoming, version.grading_mode)
+
+    edits: list[dict] = []
+    incoming_keys = {item.item_key for item in incoming}
+    for key, existing in current.items():
+        if key not in incoming_keys:
+            edits.append({"op": "delete", "item_key": key, "from": existing.text})
+    for item in incoming:
+        existing = current.get(item.item_key)
+        if existing is None:
+            edits.append({"op": "add", "item_key": item.item_key, "to": item.text})
+            continue
+        if abs(existing.weight - item.weight) > 1e-9:
+            edits.append({"op": "update_weight", "item_key": item.item_key,
+                          "from": existing.weight, "to": item.weight})
+        if existing.text.strip() != item.text.strip():
+            edits.append({"op": "edit_text", "item_key": item.item_key,
+                          "from": existing.text, "to": item.text})
+        if sorted(existing.concept_ids or []) != sorted(item.concept_ids):
+            edits.append({"op": "retag_concepts", "item_key": item.item_key,
+                          "from": list(existing.concept_ids or []), "to": item.concept_ids})
+        if (existing.static_check or None) != (item.static_check or None):
+            edits.append({"op": "change_check", "item_key": item.item_key,
+                          "from": existing.static_check, "to": item.static_check})
+
+    if not edits:
+        return AmendResult(version, [], repairs, False, "Nothing changed.")
+
+    if note:
+        edits.append({"op": "note", "detail": note})
+
+    target = version
+    created = False
+    if version.approved_at is not None:
+        target = _clone_version(session, version, faculty_id)
+        created = True
+
+    for item in session.scalars(select(RubricItem).where(RubricItem.version_id == target.id)):
+        session.delete(item)
+    session.flush()
+
+    for ordinal, item in enumerate(incoming):
+        session.add(
+            RubricItem(
+                version_id=target.id,
+                item_key=item.item_key,
+                ordinal=ordinal,
+                text=item.text,
+                category=item.category,
+                weight=item.weight,
+                concept_ids=item.concept_ids,
+                checkable_by=item.checkable_by,
+                test_ids=item.test_ids,
+                static_check=item.static_check,
+                auto_gradeable=item.auto_gradeable,
+            )
+        )
+    target.authoring_edits = list(target.authoring_edits or []) + edits
+    target.approved_by = faculty_id
+    target.approved_at = _now()
+    session.flush()
+
+    message = (
+        f"Saved as version {target.version}. Work already marked keeps the rubric it was marked "
+        "against - regrade to move it onto this one."
+        if created
+        else "Draft updated."
+    )
+    return AmendResult(target, edits, repairs, created, message)
+
+
+def _assert_gradeable(items: list[DraftRubricItem], mode: str) -> None:
+    """Refuse a rubric where an item could never earn evidence."""
+    unreachable = [
+        item.item_key
+        for item in items
+        if not item.static_check
+        and not ({"test", "structural", "report"} & set(item.checkable_by or []))
+    ]
+    if unreachable:
+        raise ValueError(
+            f"These criteria have nothing behind them and no submission could ever satisfy them: "
+            f"{', '.join(unreachable)}. Give each one a check, or mark it for manual grading."
+        )
+    if mode != "executable" and not any(
+        item.static_check or {"structural", "report"} & set(item.checkable_by or [])
+        for item in items
+    ):
+        raise ValueError(
+            "Without a reference solution at least one criterion needs a static check, structural "
+            "evidence, or the report to draw on."
+        )
+
+
+def _clone_version(
+    session: Session, version: AssignmentVersion, faculty_id: str
+) -> AssignmentVersion:
+    """Copy a version's tests, reference and settings into a fresh version."""
+    assignment = session.get(Assignment, version.assignment_id)
+    next_number = max((v.version for v in assignment.versions), default=0) + 1
+    clone = AssignmentVersion(
+        assignment_id=version.assignment_id,
+        version=next_number,
+        spec_text=version.spec_text,
+        language=version.language,
+        entry_point=version.entry_point,
+        reference_solution=version.reference_solution,
+        created_by=faculty_id,
+        drafted_by_model=version.drafted_by_model,
+        grading_mode=version.grading_mode,
+        generated_parts=list(version.generated_parts or []),
+        authoring_edits=[{"op": "amended_from", "version": version.version}],
+    )
+    session.add(clone)
+    session.flush()
+
+    for test in session.scalars(select(TestCase).where(TestCase.version_id == version.id)):
+        session.add(
+            TestCase(
+                version_id=clone.id,
+                test_key=test.test_key,
+                ordinal=test.ordinal,
+                category=test.category,
+                weight=test.weight,
+                call=test.call,
+                setup=test.setup,
+                args=test.args,
+                expected_output=test.expected_output,
+                property_spec=test.property_spec,
+                hidden=test.hidden,
+                validated_against_reference=test.validated_against_reference,
+                validation_note=test.validation_note,
+            )
+        )
+    session.flush()
+    return clone
+
+
+def set_published(
+    session: Session, version: AssignmentVersion, faculty_id: str, published: bool
+) -> AssignmentVersion:
+    """Publish a version, or close the assignment to new submissions.
+
+    Unpublishing withdraws **every** version of the assignment, not just this
+    one. Clearing approval on the newest alone would quietly hand students back
+    to an older rubric that is still approved - so an instructor who meant
+    "stop, this is wrong" would get "carry on, against the version I was trying
+    to replace". Closing means closed.
+
+    Nothing already marked is deleted. Past runs keep pointing at the version
+    they were graded against, and reopening restores the assignment as it was.
+    """
+    if published:
+        approve_version(session, version, faculty_id)
+        return version
+
+    assignment = session.get(Assignment, version.assignment_id)
+    for other in assignment.versions:
+        if other.approved_at is not None:
+            other.authoring_edits = list(other.authoring_edits or []) + [
+                {"op": "withdrawn", "by": faculty_id, "at": _now().isoformat()}
+            ]
+            other.approved_at = None
+            other.approved_by = None
+    session.flush()
+    return version
+
+
 def apply_faculty_edits(
     session: Session,
     version: AssignmentVersion,

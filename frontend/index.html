@@ -12,12 +12,20 @@
     <aside class="sidebar">
       <div class="brand"><span class="brand-mark">E</span><b>EvalPro</b></div>
       <div class="who">
-        <label for="course-select">Course</label>
-        <select id="course-select"></select>
+        <label>View as</label>
+        <div class="roles" id="role-switch">
+          <button type="button" data-role="student">Student</button>
+          <button type="button" data-role="faculty">Faculty</button>
+          <button type="button" data-role="admin">Admin</button>
+        </div>
       </div>
       <div class="who">
-        <label for="user-select">Signed in as</label>
+        <label for="user-select">Person</label>
         <select id="user-select"></select>
+      </div>
+      <div class="who">
+        <label for="course-select">Course</label>
+        <select id="course-select"></select>
       </div>
       <nav class="menu" id="menu"></nav>
     </aside>

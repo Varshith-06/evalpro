@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from .models import (
     Assignment,
+    ConceptObservation,
     AssignmentVersion,
     BloomLevel,
     Concept,
@@ -516,6 +517,10 @@ def seed_submissions(
     progress=None,
 ) -> dict:
     rng = random.Random(SEED + 1)
+    # Timing draws come from their own stream. Sharing one would mean that
+    # changing how submissions are dated silently reshuffles who is strong and
+    # who struggles, so the demo would stop being reproducible for no reason.
+    timing_rng = random.Random(SEED + 2)
     bands = assign_bands(students, rng)
     stats = {"submitted": 0, "released": 0, "escalated": 0, "skipped": 0}
 
@@ -586,6 +591,13 @@ def seed_submissions(
                 stats["skipped"] += 1
                 continue
 
+            # Place the attempt in the term rather than at import time. Without
+            # this every seeded submission is months past its due date and the
+            # whole demo reads as a class that never hands anything in on time -
+            # and the late-start signal the risk model uses becomes meaningless
+            # because it fires for everybody.
+            _backdate(session, run, assignment, band, timing_rng)
+
             stats["submitted"] += 1
             verdict = run.verdict
             if verdict and verdict.state.value == "released":
@@ -599,6 +611,36 @@ def seed_submissions(
 
     del by_code
     return stats
+
+
+def _backdate(session: Session, run, assignment: Assignment, band: str, rng: random.Random) -> None:
+    """Move an attempt to a plausible moment in the semester.
+
+    Strong students hand in early, struggling ones late and occasionally past
+    the deadline, which is exactly the behavioural signal §7.3 wants.
+    """
+    due = assignment.due_at
+    if due is None:
+        return
+    offsets = {
+        "strong": (-9, -3),
+        "solid": (-6, -1),
+        "mixed": (-3, 1),
+        "struggling": (-1, 4),
+    }[band]
+    delta = timedelta(days=rng.randint(*offsets), hours=rng.randint(0, 23))
+    submitted = due + delta
+
+    attempt = run.attempt
+    attempt.submitted_at = submitted
+    attempt.late_seconds = max(0, int((submitted - due).total_seconds()))
+    run.started_at = submitted
+    run.finished_at = submitted + timedelta(seconds=1)
+    for observation in session.query(ConceptObservation).filter(
+        ConceptObservation.run_id == run.id
+    ):
+        observation.observed_at = run.finished_at
+    session.flush()
 
 
 def seed_faculty_review(session: Session, course: Course, faculty: User) -> dict:
@@ -645,22 +687,41 @@ def seed_faculty_review(session: Session, course: Course, faculty: User) -> dict
         )
         appeals += 1
 
+    known_labels = {
+        "c_bounds_check": "Assumes the input is non-empty",
+        "c_defensive_prog": "Assumes the input is non-empty",
+        "c_binary_search": "Reports index 0 for an absent value",
+        "c_search_correctness": "Reports index 0 for an absent value",
+        "c_recursion_basics": "Recurses into the first branch only",
+        "c_recursion_depth": "Recurses into the first branch only",
+        "c_tree_traversal": "Recurses into the first branch only",
+        "c_tree_structure": "Recurses into the first branch only",
+        "c_complexity": "Correct answer by a quadratic route",
+        "c_hash_concept": "Counts by rescanning instead of using a map",
+        "c_dict_usage": "Counts by rescanning instead of using a map",
+        "c_frequency_counting": "Counts by rescanning instead of using a map",
+        "c_comparison_sort": "Inner loop stops one element short",
+        "c_sort_invariants": "Inner loop stops one element short",
+        "c_loops": "Inner loop stops one element short",
+        "c_list_indexing": "Inner loop stops one element short",
+    }
     labelled = 0
-    for cluster in session.scalars(
-        select(MisconceptionCluster).where(MisconceptionCluster.course_id == course.id)
-    ):
+    clusters = sorted(
+        session.scalars(
+            select(MisconceptionCluster).where(MisconceptionCluster.course_id == course.id)
+        ),
+        key=lambda c: -c.size,
+    )
+    # An instructor names the big ones first and leaves the long tail alone,
+    # which is what the screen actually looks like in a real second week.
+    for cluster in clusters[:3]:
         if cluster.label:
             continue
-        concepts = cluster.concept_keys or []
-        if "c_bounds_check" in concepts:
-            cluster.label = "Assumes the input is non-empty"
-        elif "c_binary_search" in concepts or "c_search_correctness" in concepts:
-            cluster.label = "Reports index 0 for an absent value"
-        elif "c_recursion_basics" in concepts or "c_recursion_depth" in concepts:
-            cluster.label = "Recurses into the first branch only"
-        elif "c_complexity" in concepts:
-            cluster.label = "Correct answer by a quadratic route"
-        else:
+        for key in cluster.concept_keys or []:
+            if key in known_labels:
+                cluster.label = known_labels[key]
+                break
+        if not cluster.label:
             continue
         cluster.named_by = faculty.id
         labelled += 1

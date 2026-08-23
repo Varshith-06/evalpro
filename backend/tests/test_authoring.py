@@ -12,17 +12,9 @@ output, so the mode is derived from the inputs rather than chosen.
 """
 from __future__ import annotations
 
-import os
-import tempfile
-from pathlib import Path
-
 import pytest
 
-_TMP = Path(tempfile.mkdtemp(prefix="evalpro-authoring-"))
-os.environ["EVALPRO_VAR"] = str(_TMP)
-os.environ["EVALPRO_DATABASE_URL"] = f"sqlite:///{_TMP / 'authoring.db'}"
-os.environ["EVALPRO_DEMO"] = "0"
-
+# The database lives in a fresh temporary directory; see tests/conftest.py.
 from fastapi.testclient import TestClient  # noqa: E402
 
 from app.db import init_db, session_scope  # noqa: E402

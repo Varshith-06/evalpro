@@ -20,8 +20,11 @@ from ..models import (
     Appeal,
     AppealState,
     Assignment,
+    AssignmentVersion,
     Concept,
+    ConceptObservation,
     Course,
+    FacultyOverride,
     EvaluationRun,
     MisconceptionCluster,
     RubricItem,
@@ -225,6 +228,276 @@ def create_assignment(
         },
         "rubric_items": len(version.rubric_items),
         "tests_admitted": sum(1 for t in version.test_cases if t.validated_against_reference),
+    }
+
+
+class RubricEdit(BaseModel):
+    faculty_id: str
+    items: list[dict]
+    note: str = ""
+    regrade: bool = False
+
+
+class PublishRequest(BaseModel):
+    faculty_id: str
+    published: bool = True
+
+
+@router.post("/versions/{version_id}/rubric")
+def amend_rubric(
+    version_id: str, payload: RubricEdit, session: Session = Depends(get_session)
+) -> dict:
+    """Replace a version's rubric.
+
+    Editing an approved rubric creates a new version; a draft is edited in
+    place. Already-marked work keeps the rubric it was marked against until
+    somebody deliberately regrades it, which is what makes an old grade
+    reproducible.
+    """
+    version = session.get(AssignmentVersion, version_id)
+    if version is None:
+        raise HTTPException(404, "version not found")
+    try:
+        result = authoring_service.amend_rubric(
+            session, version, payload.faculty_id, payload.items, payload.note
+        )
+    except authoring_service.SchemaViolation as exc:
+        raise HTTPException(400, f"Rubric rejected: {exc}") from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+    session.commit()
+
+    regraded = 0
+    if payload.regrade and result.created_new_version:
+        runs = grading_service.regrade(session, result.version.assignment_id, result.version)
+        regraded = len(runs)
+        session.commit()
+        analytics_service.refresh_course_analytics(
+            session, session.get(Assignment, result.version.assignment_id).course_id
+        )
+        session.commit()
+
+    return {
+        "version_id": result.version.id,
+        "version": result.version.version,
+        "created_new_version": result.created_new_version,
+        "changes": result.edits,
+        "repairs": result.repairs,
+        "regraded": regraded,
+        "message": result.message,
+    }
+
+
+@router.post("/versions/{version_id}/publish")
+def publish_version(
+    version_id: str, payload: PublishRequest, session: Session = Depends(get_session)
+) -> dict:
+    version = session.get(AssignmentVersion, version_id)
+    if version is None:
+        raise HTTPException(404, "version not found")
+    try:
+        authoring_service.set_published(session, version, payload.faculty_id, payload.published)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    session.commit()
+    return {"version_id": version.id, "published": version.approved_at is not None}
+
+
+@router.delete("/assignments/{assignment_id}")
+def delete_assignment(
+    assignment_id: str, confirm: bool = False, session: Session = Depends(get_session)
+) -> dict:
+    """Remove an assignment and everything it produced.
+
+    Requires ``?confirm=true`` once anything has been submitted: deleting a
+    graded assignment throws away marks and the concept evidence built from
+    them, and that should take two decisions rather than one misclick.
+    """
+    assignment = session.get(Assignment, assignment_id)
+    if assignment is None:
+        raise HTTPException(404, "assignment not found")
+
+    submitted = session.scalar(
+        select(func.count(Submission.id)).where(Submission.assignment_id == assignment_id)
+    ) or 0
+    if submitted and not confirm:
+        raise HTTPException(
+            409,
+            f"{submitted} student(s) have already submitted. Deleting this removes their marks "
+            "and the topic evidence built from them. Re-send with confirm=true if that is what "
+            "you want.",
+        )
+
+    course_id = assignment.course_id
+
+    # Order matters. An evaluation run points at the rubric version it was
+    # graded against, and appeals and overrides point at the run, so the leaves
+    # have to go before the assignment cascade tries to remove the version.
+    run_ids = [
+        row
+        for row in session.scalars(
+            select(EvaluationRun.id)
+            .join(SubmissionAttempt, SubmissionAttempt.id == EvaluationRun.attempt_id)
+            .join(Submission, Submission.id == SubmissionAttempt.submission_id)
+            .where(Submission.assignment_id == assignment_id)
+        )
+    ]
+    if run_ids:
+        for model in (Appeal, FacultyOverride, ConceptObservation):
+            session.query(model).filter(model.run_id.in_(run_ids)).delete(
+                synchronize_session=False
+            )
+    for model in (ConceptObservation, MisconceptionCluster, RubricItemStats, SimilarityPair):
+        session.query(model).filter(model.assignment_id == assignment_id).delete(
+            synchronize_session=False
+        )
+    session.flush()
+    # The bulk deletes above bypass the identity map, so anything already loaded
+    # is now stale. Expiring first stops the cascade below from trying to remove
+    # rows that have already gone.
+    session.expire_all()
+    assignment = session.get(Assignment, assignment_id)
+
+    # ORM delete so attempts, runs, stage results, item scores, test results and
+    # verdicts all cascade before the versions they reference are removed.
+    for submission in list(assignment.submissions):
+        session.delete(submission)
+    session.flush()
+
+    # Re-read so the assignment's own cascade does not try to delete the
+    # submissions a second time.
+    session.expire_all()
+    session.delete(session.get(Assignment, assignment_id))
+    session.commit()
+
+    analytics_service.refresh_course_analytics(session, course_id)
+    session.commit()
+    return {"deleted": assignment_id, "submissions_removed": submitted}
+
+
+@router.get("/assignments/{assignment_id}/submissions")
+def assignment_submissions(assignment_id: str, session: Session = Depends(get_session)) -> dict:
+    """Everyone on the roster and where they stand on this assignment.
+
+    Students who have not submitted are listed too - the absences are usually
+    the most useful thing on the page.
+    """
+    assignment = session.get(Assignment, assignment_id)
+    if assignment is None:
+        raise HTTPException(404, "assignment not found")
+
+    roster = analytics_service.enrolled_students(session, assignment.course_id)
+    rows = session.execute(
+        select(EvaluationRun, Verdict, SubmissionAttempt, Submission)
+        .join(Verdict, Verdict.run_id == EvaluationRun.id)
+        .join(SubmissionAttempt, SubmissionAttempt.id == EvaluationRun.attempt_id)
+        .join(Submission, Submission.id == SubmissionAttempt.submission_id)
+        .where(Submission.assignment_id == assignment_id, EvaluationRun.visible_only.is_(False))
+        .order_by(EvaluationRun.started_at)
+    ).all()
+
+    latest: dict[str, dict] = {}
+    attempts: dict[str, int] = {}
+    for run, verdict, attempt, submission in rows:
+        attempts[submission.student_id] = max(
+            attempts.get(submission.student_id, 0), attempt.attempt_no
+        )
+        latest[submission.student_id] = {
+            "run_id": run.id,
+            "attempt_no": attempt.attempt_no,
+            "submitted_at": attempt.submitted_at.isoformat() if attempt.submitted_at else None,
+            "score": round(verdict.total_fraction, 4),
+            "points": round(verdict.total_points, 2),
+            "state": verdict.state.value,
+            "needs_review": verdict.state == VerdictState.ESCALATED,
+            "integrity_flag": verdict.integrity_flag,
+            "late": attempt.late_seconds > 0,
+        }
+
+    students = []
+    for student in roster:
+        entry = latest.get(student.id)
+        students.append(
+            {
+                "student_id": student.id,
+                "student_name": student.name,
+                "external_id": student.external_id,
+                "attempts": attempts.get(student.id, 0),
+                **(entry or {"state": "not_submitted", "score": None, "needs_review": False}),
+            }
+        )
+    students.sort(key=lambda s: (s["state"] != "escalated", s["score"] is not None, s["student_name"]))
+
+    graded = [s for s in students if s["score"] is not None]
+    return {
+        "assignment": {"id": assignment.id, "code": assignment.code, "title": assignment.title},
+        "students": students,
+        "summary": {
+            "roster": len(roster),
+            "submitted": len(graded),
+            "not_submitted": len(roster) - len(graded),
+            "needs_review": sum(1 for s in students if s["needs_review"]),
+            "average": round(sum(s["score"] for s in graded) / len(graded), 4) if graded else None,
+        },
+    }
+
+
+@router.get("/courses/{course_id}/gradebook")
+def gradebook(course_id: str, session: Session = Depends(get_session)) -> dict:
+    """Marks for everyone, every assignment. The screen faculty ask for first."""
+    assignments = session.scalars(
+        select(Assignment).where(Assignment.course_id == course_id).order_by(Assignment.due_at)
+    ).all()
+    roster = analytics_service.enrolled_students(session, course_id)
+
+    rows = session.execute(
+        select(Verdict, EvaluationRun, Submission)
+        .join(EvaluationRun, EvaluationRun.id == Verdict.run_id)
+        .join(SubmissionAttempt, SubmissionAttempt.id == EvaluationRun.attempt_id)
+        .join(Submission, Submission.id == SubmissionAttempt.submission_id)
+        .join(Assignment, Assignment.id == Submission.assignment_id)
+        .where(Assignment.course_id == course_id, EvaluationRun.visible_only.is_(False))
+        .order_by(EvaluationRun.started_at)
+    ).all()
+
+    cells: dict[tuple[str, str], dict] = {}
+    for verdict, run, submission in rows:
+        cells[(submission.student_id, submission.assignment_id)] = {
+            "run_id": run.id,
+            "score": round(verdict.total_fraction, 4),
+            "points": round(verdict.total_points, 2),
+            "max_points": round(verdict.max_points, 2),
+            "state": verdict.state.value,
+        }
+
+    students = []
+    for student in roster:
+        marks = [cells.get((student.id, a.id)) for a in assignments]
+        earned = [m for m in marks if m]
+        students.append(
+            {
+                "student_id": student.id,
+                "student_name": student.name,
+                "external_id": student.external_id,
+                "marks": marks,
+                "total_points": round(sum(m["points"] for m in earned), 2),
+                "max_points": round(sum(m["max_points"] for m in earned), 2),
+                "overall": round(
+                    sum(m["points"] for m in earned) / sum(m["max_points"] for m in earned), 4
+                )
+                if earned and sum(m["max_points"] for m in earned)
+                else None,
+            }
+        )
+
+    return {
+        "assignments": [
+            {"id": a.id, "code": a.code, "title": a.title,
+             "due_at": a.due_at.isoformat() if a.due_at else None}
+            for a in assignments
+        ],
+        "students": students,
     }
 
 

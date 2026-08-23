@@ -13,6 +13,7 @@ import * as sProgress from "./pages/student-progress.js";
 import * as fAssignments from "./pages/faculty-assignments.js";
 import * as fNew from "./pages/faculty-new-assignment.js";
 import * as fAssignment from "./pages/faculty-assignment.js";
+import * as fMarks from "./pages/faculty-marks.js";
 import * as fReview from "./pages/faculty-review.js";
 import * as fReviewOne from "./pages/faculty-review-one.js";
 import * as fClass from "./pages/faculty-class.js";
@@ -44,6 +45,7 @@ const ROUTES = [
   { path: "f/new", role: "faculty", page: fNew, label: "New assignment" },
   { path: "f/assignment", role: "faculty", page: fAssignment, label: "Assignment", param: true },
   { path: "f/review", role: "faculty", page: fReview, label: "To review" },
+  { path: "f/marks", role: "faculty", page: fMarks, label: "Marks" },
   { path: "f/submission", role: "faculty", page: fReviewOne, label: "Submission", param: true },
   { path: "f/class", role: "faculty", page: fClass, label: "Class progress" },
   { path: "f/mistakes", role: "faculty", page: fMistakes, label: "Common mistakes" },
@@ -59,7 +61,7 @@ const MENUS = {
     { group: null, items: ["s/labs", "s/progress"] },
   ],
   faculty: [
-    { group: "Teaching", items: ["f/assignments", "f/review"] },
+    { group: "Teaching", items: ["f/assignments", "f/review", "f/marks"] },
     { group: "Insight", items: ["f/class", "f/mistakes"] },
   ],
   admin: [
@@ -115,9 +117,14 @@ async function boot() {
     ctx.userId = id;
     const chosen = [...ctx.students, ...ctx.staff].find((u) => u.id === id);
     ctx.userName = chosen?.name ?? "";
+    drawRoles();
     if (changedRole) go(DEFAULT_ROUTE[role]);
     else render();
   });
+
+  document.querySelectorAll("#role-switch button").forEach((button) =>
+    button.addEventListener("click", () => switchRole(button.dataset.role)),
+  );
 
   await loadPeople();
   window.addEventListener("hashchange", render);
@@ -156,6 +163,7 @@ async function loadPeople() {
     ctx.role = staffMatch ? staffMatch.role : students.length ? "student" : staff[0]?.role || "faculty";
   }
   select.value = `${ctx.role}|${ctx.userId}`;
+  drawRoles();
 }
 
 export async function refreshCounts() {
@@ -169,6 +177,29 @@ export async function refreshCounts() {
     ctx.counts = {};
   }
   drawMenu(currentRoute()?.path);
+}
+
+function drawRoles() {
+  document.querySelectorAll("#role-switch button").forEach((button) =>
+    button.classList.toggle("active", button.dataset.role === ctx.role),
+  );
+}
+
+/** Switching role picks a sensible person for it, so one click is enough. */
+function switchRole(role) {
+  if (role === ctx.role) return;
+  const person =
+    role === "student" ? ctx.students[0] : ctx.staff.find((s) => s.role === role) || ctx.staff[0];
+  if (!person) {
+    toast(`Nobody on this course has the ${role} role.`, "bad");
+    return;
+  }
+  ctx.role = role;
+  ctx.userId = person.id;
+  ctx.userName = person.name;
+  document.getElementById("user-select").value = `${role}|${person.id}`;
+  drawRoles();
+  go(DEFAULT_ROUTE[role]);
 }
 
 function currentRoute() {

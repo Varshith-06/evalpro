@@ -23,6 +23,7 @@ rule already enforced is that a student cannot read another student's run.
 | `POST` | `/api/assignments/{assignment_id}/draft` | **A1–A3**: draft a rubric and tests from a brief, then validate every test against the reference solution |
 | `POST` | `/api/versions/{version_id}/approve` | **A4**: apply faculty edits and approve. Nothing grades until this runs |
 | `POST` | `/api/submit` | Submit an attempt and evaluate it |
+| `POST` | `/api/submit/upload` | Submit a source file or a `.zip` (multipart), through the same B0 limits |
 | `GET` | `/api/runs/{run_id}` | Full evidence trail for a run |
 | `POST` | `/api/runs/{run_id}/appeal` | One-click appeal on a specific rubric item |
 
@@ -93,6 +94,11 @@ Reading another student's run returns `403`.
 | `GET` | `/api/faculty/courses/{course_id}/assignments` | Assignment list with grading mode, submission counts and review backlog |
 | `POST` | `/api/faculty/courses/{course_id}/assignments/preview` | **Dry run**: what rubric would be generated from this brief, without creating anything |
 | `POST` | `/api/faculty/courses/{course_id}/assignments` | Create an assignment from a partially-filled form |
+| `DELETE` | `/api/faculty/assignments/{assignment_id}` | Delete an assignment; needs `?confirm=true` once anything has been submitted |
+| `GET` | `/api/faculty/assignments/{assignment_id}/submissions` | Everyone on the roster and where they stand, including who has not submitted |
+| `GET` | `/api/faculty/courses/{course_id}/gradebook` | Marks for every student against every assignment |
+| `POST` | `/api/faculty/versions/{version_id}/rubric` | Replace a version's criteria; optionally re-mark |
+| `POST` | `/api/faculty/versions/{version_id}/publish` | Publish a draft, or withdraw an assignment from students |
 | `GET` | `/api/faculty/courses/{course_id}/health` | Cohort heatmap, re-teach signals, broken items, misconceptions, interventions, pacing |
 | `GET` | `/api/faculty/courses/{course_id}/queue` | Review queue, sorted by expected value of attention |
 | `GET` | `/api/faculty/runs/{run_id}/review` | Side-by-side evidence, reference solution, similarity report |
@@ -142,6 +148,22 @@ student's grade.
 
 The `preview` endpoint takes the same brief and returns the rubric that *would*
 be generated, plus the phrase each item came from, without creating anything.
+
+### Editing criteria after the fact
+
+`POST /api/faculty/versions/{version_id}/rubric` takes the full desired list of
+items and diffs it against what is there, recording every add, deletion,
+reweight, re-tag and check change as authoring provenance.
+
+**Editing an approved rubric creates a new version; a draft is edited in place.**
+Runs pin the version they were graded against, so existing marks do not move
+until `regrade: true` deliberately moves them. The response reports
+`created_new_version`, the `changes` applied, and how many submissions were
+re-marked.
+
+It refuses, rather than publishing, when an item could never earn evidence — a
+criterion with no check, no test and no report behind it is a mark no submission
+can reach, and it would silently cap every student.
 
 `queue` entries carry `priority` (escalation severity × contested rubric weight
 × confidence deficit) and `why_this_first` in plain language. The first item
