@@ -293,7 +293,7 @@ def build_solution_slide(slide) -> None:
         (
             "Innovation and uniqueness of the solution",
             [
-                "A missing bracket costs two marks, not the whole lab.",
+                "It marks the thinking, not just the output - a right idea with one wrong line still scores.",
                 "The answer key never touches the student's program, so it cannot be copied.",
                 "It marks the question paper too - unclear questions are flagged to the teacher.",
                 "When it is unsure, it says so and hands the work to a human.",

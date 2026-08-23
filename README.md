@@ -119,7 +119,22 @@ missing colon costs two marks, not a hundred percent of them.* This single
 mechanism resolves most "I got a zero and I'd basically solved it" cases.
 
 **Structural credit.** Code that is structurally a correct binary search with an
-off-by-one earns algorithm-comprehension marks at a 0% test pass rate.
+off-by-one earns algorithm-comprehension marks at a 0% test pass rate. It is
+consulted on every rubric item that behaviour is supposed to answer, including
+items whose tests all failed, and it can only ever *raise* a mark - a correct
+submission is never taxed by a similarity heuristic. When the code will not even
+parse, the error-tolerant reader recovers the control-flow shape and marks that
+instead. Measured on the seeded sorting lab:
+
+| Submission | Tests passing | Mark |
+| --- | --- | --- |
+| Correct | all | 100% |
+| Right algorithm, comparison flipped | **none** | 60% |
+| Same idea, three syntax errors, will not compile | none | 34% |
+| Returns an empty list | none | 26% |
+
+Where an assignment has no reference solution and therefore no tests, this is
+not a fallback - it is the whole mark.
 
 **Static rubric checks.** Deterministic queries against the code graph — a guard
 on the empty-input path, recursion where required, a required API actually
@@ -286,10 +301,12 @@ implementation specification this is built from.
 - **The sandbox on a developer machine is not a production boundary.** Layers 1,
   3, 5, 7 and 8 need a Linux host with KVM. The system reports exactly which
   layers it is missing rather than implying it has them.
-- **Auto-release coverage in the demo is about 45%**, not the 70% the spec
+- **Auto-release coverage in the demo is about 60%**, not the 70% the spec
   targets for semester 2. That is the honest cold-start number: the demo cohort
   is deliberately full of broken code, and the confidence estimator has three
-  faculty overrides to learn from rather than three thousand.
+  faculty overrides to learn from rather than three thousand. What is left is
+  not noise - every escalation in the seeded run is a copied submission, a
+  self-report the code contradicts, or a mark sitting on the pass/fail line.
 - **The entailment model is a lexical stand-in.** The production design is a
   fine-tuned DeBERTa-v3 encoder; the interface is identical, so swapping it in
   changes one module.

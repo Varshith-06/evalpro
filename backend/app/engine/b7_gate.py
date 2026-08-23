@@ -37,6 +37,15 @@ class Signal:
     score: float           # 0..1
     reliability: float     # 0..1
     note: str = ""
+    #: Whether this signal is a second opinion on the same question.
+    #:
+    #: Agreement asks "do the sources that could each independently settle this
+    #: item point the same way". Partial credit is not such a source: when tests
+    #: fail and structural credit says the approach was right, the two are not
+    #: contradicting each other - one is measuring output, the other
+    #: comprehension, and both are true at once. Counting that as disagreement
+    #: would send every partially-credited submission to a human for no reason.
+    corroborating: bool = True
 
     def as_dict(self) -> dict:
         return {
@@ -44,6 +53,7 @@ class Signal:
             "score": round(self.score, 4),
             "reliability": round(self.reliability, 3),
             "note": self.note,
+            "corroborating": self.corroborating,
         }
 
 
@@ -76,11 +86,20 @@ class ItemAggregate:
     features: dict[str, float] = field(default_factory=dict)
 
 
-def _weighted_score(signals: list[Signal]) -> float:
+def weighted_score(signals: list[Signal]) -> float:
+    """The item score: each signal weighted by how much that source is worth.
+
+    Public because the cascade needs to ask "would adding this signal raise or
+    lower the item" before deciding whether to add it at all.
+    """
     total_reliability = sum(s.reliability for s in signals)
     if total_reliability <= 0:
         return 0.0
     return sum(s.score * s.reliability for s in signals) / total_reliability
+
+
+# Kept for readability at the call sites inside this module.
+_weighted_score = weighted_score
 
 
 def signal_agreement(signals: list[Signal]) -> float:
@@ -94,13 +113,14 @@ def signal_agreement(signals: list[Signal]) -> float:
     cases the same, which is both wrong and the reason such a system ends up
     escalating everything and getting switched off.
     """
-    if not signals:
+    voting = [s for s in signals if s.corroborating] or signals
+    if not voting:
         return 0.0
-    if len(signals) == 1:
-        return 0.35 + 0.5 * signals[0].reliability
-    aggregate = _weighted_score(signals)
-    total_reliability = sum(s.reliability for s in signals) or 1.0
-    deviation = sum(abs(s.score - aggregate) * s.reliability for s in signals) / total_reliability
+    if len(voting) == 1:
+        return 0.35 + 0.5 * voting[0].reliability
+    aggregate = _weighted_score(voting)
+    total_reliability = sum(s.reliability for s in voting) or 1.0
+    deviation = sum(abs(s.score - aggregate) * s.reliability for s in voting) / total_reliability
     return max(0.0, 1.0 - 2.0 * deviation)
 
 

@@ -243,6 +243,10 @@ class EvaluationPipeline:
         passed = [e for e in ran if e.passed]
         pass_rate = len(passed) / len(ran) if ran else 0.0
         context["test_pass_rate"] = pass_rate
+        # Whether a validated test suite existed, as distinct from whether it
+        # ran. "No tests to run" and "tests we could not run" are different
+        # facts about a submission and must not be scored the same way.
+        context["oracle_exists"] = bool(admitted)
         context["grading_mode"] = static_mode and "static" or "executable"
         context["has_executable_oracle"] = 0.0 if static_mode else 1.0
         self._persist_tests(run, executions)
@@ -530,12 +534,33 @@ class EvaluationPipeline:
                         detail = execution.reason or f"expected {execution.expected[:80]}, got {execution.actual[:80]}"
                         evidence.append(f"{execution.test_key} ({execution.category}) {execution.outcome.value}: {detail}")
             elif item.test_ids:
-                evidence.append(
-                    "Tests for this item were not executed"
-                    + (" (hidden set withheld from pre-deadline feedback)." if any(
-                        by_test.get(k) and by_test[k].hidden for k in item.test_ids
-                    ) else " because the submission could not be built or repaired.")
-                )
+                withheld = bool(item_tests) and all(e.hidden for e in item_tests)
+                if withheld:
+                    evidence.append(
+                        "Tests for this item were not executed (hidden set withheld from "
+                        "pre-deadline feedback)."
+                    )
+                elif context.get("oracle_exists"):
+                    # A submission that could not be built has not passed these
+                    # tests, and treating that as "no evidence" scored it above
+                    # a submission that built and failed them - so unbuildable
+                    # code came out ahead of merely wrong code. Failing to
+                    # produce a runnable program is a failing test result, and
+                    # the structural credit below still applies on top.
+                    signals.append(
+                        b7_gate.Signal(
+                            "test",
+                            0.0,
+                            b7_gate.SOURCE_RELIABILITY["test"],
+                            "no test could run: the submission did not build",
+                        )
+                    )
+                    evidence.append(
+                        "The submission could not be built, and no repair was found, so none of "
+                        "this item's tests could run. Credit below is for the approach only."
+                    )
+                else:
+                    evidence.append("No test evidence is available for this item.")
 
             # --- static signal -----------------------------------------
             if item.static_check:
@@ -551,25 +576,34 @@ class EvaluationPipeline:
                 )
                 evidence.append(result.detail)
 
-            # --- structural signal --------------------------------------
-            # Structural credit applies when the item asks for it, or when it
-            # asked for tests that could not be run - the B5b case where code
-            # that is structurally the right algorithm earns comprehension
-            # marks at a 0% pass rate. It is not a filler signal for items that
-            # are checked some other way.
+            # --- structural signal: partial credit -----------------------
+            # B5b. Code that is structurally a correct binary search with an
+            # off-by-one earns algorithm-comprehension marks at a 0% test pass
+            # rate. Without this an item whose every test fails scores zero, and
+            # a student who plainly understood the problem is told they got
+            # nothing - which is the single complaint that destroys trust in an
+            # autograder.
+            #
+            # The rule is that **it can only add**. The signal is appended only
+            # when doing so raises the item, which for a reliability-weighted
+            # mean is exactly the condition that structural credit exceeds what
+            # the item already scores. So it lifts a failing item and can never
+            # drag down a passing one.
+            #
+            # It applies to items whose evidence is meant to be behavioural -
+            # tests, or an explicit structural request. An item asking whether a
+            # guard exists is not answered by "the algorithm looks right", so a
+            # failed static check is left alone.
             wants_structural = "structural" in (item.checkable_by or [])
-            tests_expected_but_absent = bool(item.test_ids) and not ran
-            # Where an exact static query already answers the item -- is there a
-            # guard, is it recursive, was the forbidden API used -- a similarity
-            # heuristic can only dilute a definitive answer, so it is not added.
-            decided_by_static = any(s.source == "static" for s in signals)
-            if (wants_structural or (tests_expected_but_absent and item.auto_gradeable)) and not decided_by_static:
+            behavioural = wants_structural or bool(item.test_ids)
+            if behavioural and structural.fraction > b7_gate.weighted_score(signals):
                 signals.append(
                     b7_gate.Signal(
                         "structural",
                         structural.fraction,
                         b7_gate.SOURCE_RELIABILITY["structural"],
-                        "algorithm-comprehension credit from AST/CFG comparison",
+                        "partial credit for the approach, independent of the test outcome",
+                        corroborating=False,
                     )
                 )
                 evidence.extend(structural.evidence)

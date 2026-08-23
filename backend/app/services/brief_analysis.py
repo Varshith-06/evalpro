@@ -143,7 +143,9 @@ def analyse_brief(brief: str, entry_call: str = "solve") -> list[Requirement]:
                 Requirement(
                     text=f"Does not use {symbol}, as the brief requires",
                     category="correctness",
-                    weight=6.0,
+                    # A constraint, not an achievement: not calling a function
+                    # is something an empty submission also manages.
+                    weight=4.0,
                     static_check={"kind": "api_absent", "target": symbol},
                     checkable_by=["static"],
                     concept_hints=_concept_hints(sentence),
@@ -381,9 +383,13 @@ def analyse_brief(brief: str, entry_call: str = "solve") -> list[Requirement]:
         requirements.insert(
             0,
             Requirement(
+                # A precondition rather than an achievement: defining the
+                # function is where the work starts, so it is worth a token
+                # amount. Weighted equally with correctness it handed a third
+                # of the marks to a submission that did nothing else.
                 text=f"Defines the required entry point {entry_call}()",
                 category="correctness",
-                weight=6.0,
+                weight=3.0,
                 static_check={"kind": "function_defined", "target": entry_call},
                 checkable_by=["static"],
                 concept_hints=[],

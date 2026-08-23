@@ -24,6 +24,7 @@ produces, a hallucinating drafter degrades to "fewer admitted tests" rather than
 """
 from __future__ import annotations
 
+import random
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -32,9 +33,14 @@ from typing import Protocol
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..engine.b4_execute import ReferenceValidation, validate_against_reference
+from ..engine.b4_execute import (
+    ReferenceValidation,
+    derive_seed,
+    generate_input,
+    validate_against_reference,
+)
 from . import brief_analysis
-from ..engine.sandbox import DEFAULT_SANDBOX
+from ..engine.sandbox import DEFAULT_SANDBOX, SandboxJob
 from ..models import (
     Assignment,
     AssignmentVersion,
@@ -235,7 +241,10 @@ class HeuristicDrafter:
                     item_key=f"rb_{len(items) + 1:02d}",
                     text="Produces correct output for the specified behaviour",
                     category="correctness",
-                    weight=10.0,
+                    # Dominant by design. Everything else on a generated rubric
+                    # is a named requirement from the brief; this is whether the
+                    # program actually does the job, and it should outweigh them.
+                    weight=20.0,
                     concept_ids=self._propose_concepts(brief, [], concepts),
                     checkable_by=["test"],
                 )
@@ -329,6 +338,28 @@ class HeuristicDrafter:
             ),
         ]
 
+    #: Which generator suits a brief, read from the words it uses. First match
+    #: wins, so the more specific shapes come first.
+    _INPUT_SHAPES = (
+        (("nested", "tree", "depth", "hierarch"),
+         {"kind": "nested_list", "max_depth": 4, "max_width": 3}),
+        (("sorted list", "sorted array", "search for", "target"),
+         {"kind": "sorted_int_list", "n": [0, 20]}),
+        (("string", "text", "word", "sentence", "character"),
+         {"kind": "string", "n": [0, 14]}),
+        (("matrix", "grid", "2d"), {"kind": "matrix", "rows": [1, 4], "cols": [1, 4]}),
+        (("list", "array", "sequence", "numbers", "elements", "items"),
+         {"kind": "int_list", "n": [0, 12], "lo": -30, "hi": 30}),
+        (("number", "integer", "value", "count"), {"kind": "int", "range": [0, 40]}),
+    )
+
+    def input_shape(self, brief: str) -> dict:
+        lowered = brief.lower()
+        for needles, spec in self._INPUT_SHAPES:
+            if any(needle in lowered for needle in needles):
+                return dict(spec)
+        return {"kind": "int_list", "n": [0, 12], "lo": -30, "hi": 30}
+
     def draft_concepts(self, syllabus: str, course_code: str) -> list[DraftConcept]:
         topics = [m.group(1).strip() for m in _REQUIREMENT_MARKERS.finditer(syllabus)]
         drafts: list[DraftConcept] = []
@@ -349,6 +380,82 @@ class HeuristicDrafter:
 # --------------------------------------------------------------------------
 # Authoring flow
 # --------------------------------------------------------------------------
+def derive_tests_from_reference(
+    reference_solution: str,
+    entry_point: str,
+    entry_call: str,
+    brief: str,
+    count: int = 8,
+    drafter: "HeuristicDrafter | None" = None,
+) -> list[DraftTestCase]:
+    """Generate test cases by running the instructor's own solution.
+
+    This is the difference between test generation that works for sorting and
+    test generation that works for any assignment. Guessing at expected outputs
+    from a brief only ever produces tests for the exercises somebody thought to
+    write templates for; running the reference over generated inputs and
+    recording what it returns produces a real suite for whatever the instructor
+    actually set.
+
+    It is also correct by construction: every expected output came from the
+    solution the instructor is willing to stand behind. A3 still executes them
+    afterwards, which is not redundant - it catches a reference that is
+    nondeterministic, and a nondeterministic reference would make every grade
+    it produced arbitrary.
+    """
+    drafter = drafter or HeuristicDrafter()
+    shape = drafter.input_shape(brief)
+    seed = derive_seed(entry_point, entry_call, brief[:200])
+    rng = random.Random(seed)
+
+    # Boundary cases first: the empty and single-element inputs are where the
+    # interesting failures live, and a random draw rarely produces them.
+    candidates: list = []
+    if shape["kind"] in ("int_list", "sorted_int_list", "unique_int_list"):
+        candidates = [[], [7], [3, 1, 2]]
+    elif shape["kind"] == "string":
+        candidates = ["", "a"]
+    elif shape["kind"] == "nested_list":
+        candidates = [[], [1, [2]]]
+    elif shape["kind"] == "int":
+        candidates = [0, 1]
+    while len(candidates) < count:
+        candidates.append(generate_input(shape, rng))
+
+    tests: list[DraftTestCase] = []
+    for index, value in enumerate(candidates[:count], start=1):
+        args = [value]
+        job = SandboxJob(
+            test_key=f"gen_{index:02d}",
+            files={entry_point: reference_solution},
+            entry_point=entry_point,
+            call=entry_call,
+            args=args,
+        )
+        result = DEFAULT_SANDBOX.run(job)
+        if result.status != "ok" or result.value is None:
+            # The reference itself cannot handle this input. That is a fact
+            # about the brief, not about any student, so the case is dropped
+            # rather than turned into a test nobody could pass.
+            continue
+        tests.append(
+            DraftTestCase(
+                test_key=f"tc_{len(tests) + 1:02d}",
+                category="edge" if index <= 3 else ("stress" if index > count - 2 else "basic"),
+                # General cases outweigh the boundary ones. Returning the empty
+                # list for the empty list is worth something, but it must not be
+                # worth as much as actually doing the job - and the boundary is
+                # already covered separately by its own rubric item.
+                weight=1.0 if index <= 3 else 2.0,
+                call=entry_call,
+                args=args,
+                expected_output=result.value,
+                hidden=index > count - 2,
+            )
+        )
+    return tests
+
+
 @dataclass
 class AuthoringResult:
     version: AssignmentVersion
@@ -452,7 +559,14 @@ def draft_assignment_version(
     elif tests:
         test_draft = list(tests)
     else:
-        test_draft = drafter.draft_tests(brief, entry_call)
+        test_draft = derive_tests_from_reference(
+            reference_solution, entry_point or "solution.py", entry_call, brief, drafter=drafter
+        )
+        if not test_draft:
+            notes.append(
+                "No test case could be generated: the reference solution did not return a result "
+                "for any generated input. Check the entry point name and its signature."
+            )
         generated.append("tests")
 
     repairs = validate_rubric_draft(rubric_draft, concept_keys)

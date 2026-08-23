@@ -282,9 +282,17 @@ ASSIGNMENTS: list[dict] = [
              "weight": 6, "concepts": ["c_bounds_check", "c_defensive_prog"],
              "checks": ["test", "static"], "tests": ["tc_03"],
              "static": {"kind": "guard_present", "target": "input_length"}},
-            {"key": "rb_04", "text": "Implements a comparison sort rather than delegating to the built-in", "category": "correctness",
-             "weight": 6, "concepts": ["c_comparison_sort"],
+            # Two separate claims, so two separate items. Checking only "did not
+            # call sorted()" gave full marks to a program that returned the
+            # input untouched - it had not delegated to the built-in, but it had
+            # not sorted anything either.
+            {"key": "rb_04", "text": "Implements a comparison sort rather than returning the input unchanged",
+             "category": "correctness", "weight": 6, "concepts": ["c_comparison_sort"],
              "checks": ["static", "structural"], "tests": [],
+             "static": {"kind": "algorithm_class", "target": "quadratic_sort"}},
+            {"key": "rb_06", "text": "Does not delegate to the built-in sorted()", "category": "correctness",
+             "weight": 4, "concepts": ["c_comparison_sort"],
+             "checks": ["static"], "tests": [],
              "static": {"kind": "api_absent", "target": "sorted"}},
             {"key": "rb_05", "text": "Loop bounds are correct at both ends of the range", "category": "correctness",
              "weight": 5, "concepts": ["c_loops", "c_bounds_check"],
@@ -331,10 +339,13 @@ ASSIGNMENTS: list[dict] = [
              "weight": 5, "concepts": ["c_bounds_check", "c_defensive_prog"],
              "checks": ["test", "static"], "tests": ["tc_03"],
              "static": {"kind": "guard_present", "target": "input_length"}},
+            # Checked by algorithm class rather than loop nesting: "at most one
+            # loop" is also true of a function with no loops at all, so a
+            # submission that did nothing passed it.
             {"key": "rb_04", "text": "Uses a halving search rather than a linear scan", "category": "efficiency",
              "weight": 8, "concepts": ["c_binary_search", "c_complexity"],
              "checks": ["static", "structural"], "tests": [],
-             "static": {"kind": "loop_nesting", "max_depth": 1}},
+             "static": {"kind": "algorithm_class", "target": "binary_search"}},
             {"key": "rb_05", "text": "The report describes the submitted implementation and its complexity",
              "category": "communication", "weight": 5, "concepts": ["c_complexity", "c_code_documentation"],
              "checks": ["report"], "tests": []},

@@ -454,6 +454,42 @@ def identify_algorithm(graph: CodeGraph, source: str) -> list[dict]:
     return matches[:3]
 
 
+def _shape_vector(graph: CodeGraph) -> dict[str, float]:
+    """Control-flow shape, from whatever the parse recovered.
+
+    Deliberately built from the fields the lexical recovery parser can fill in
+    as well as the exact one, so a non-compiling submission still produces a
+    comparable vector.
+    """
+    vector: dict[str, float] = {"functions": float(len(graph.functions))}
+    for fn in graph.functions.values():
+        vector["loop_depth"] = vector.get("loop_depth", 0.0) + fn.loop_depth
+        vector["branches"] = vector.get("branches", 0.0) + fn.branch_count
+        vector["returns"] = vector.get("returns", 0.0) + fn.returns
+        vector["params"] = vector.get("params", 0.0) + len(fn.params)
+        vector["recursive"] = vector.get("recursive", 0.0) + (1.0 if fn.is_recursive else 0.0)
+        vector["calls"] = vector.get("calls", 0.0) + len(fn.calls)
+    return vector
+
+
+def _cosine(a: dict[str, float], b: dict[str, float]) -> float:
+    keys = set(a) | set(b)
+    if not keys:
+        return 0.0
+    dot = sum(a.get(k, 0.0) * b.get(k, 0.0) for k in keys)
+    na = sum(v * v for v in a.values()) ** 0.5
+    nb = sum(v * v for v in b.values()) ** 0.5
+    return dot / (na * nb) if na and nb else 0.0
+
+
+def _recovered_shape_similarity(graph: CodeGraph, reference_source: str) -> float:
+    reference_graph = build_code_graph({"reference.py": reference_source})
+    similarity = _cosine(_shape_vector(graph), _shape_vector(reference_graph))
+    # Coarser evidence than a tree comparison, so it is discounted rather than
+    # treated as equivalent.
+    return max(0.0, min(1.0, similarity * 0.8))
+
+
 @dataclass
 class StructuralCredit:
     similarity_to_reference: float
@@ -486,6 +522,15 @@ def structural_credit(
         similarity = tree_similarity(student_source, reference_source)
         for variant in variant_bank or []:
             similarity = max(similarity, tree_similarity(student_source, variant))
+        if similarity == 0.0 and not graph.parsed and graph.functions:
+            # pq-grams need an AST, and code that does not compile has none -
+            # which is precisely the submission this credit exists for. The
+            # error-tolerant parse still recovered functions, loops and
+            # branches, so fall back to comparing that shape against the
+            # reference. It is a coarser measure, and it is the difference
+            # between "we could not read your code, have a zero" and "your
+            # program does not build, but it is clearly the right approach".
+            similarity = _recovered_shape_similarity(graph, reference_source)
 
     matches = identify_algorithm(graph, student_source)
     matched = bool(expected_algorithm) and any(m["algorithm"] == expected_algorithm for m in matches)

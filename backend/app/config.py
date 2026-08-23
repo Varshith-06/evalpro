@@ -80,13 +80,25 @@ class GateConfig:
 
     ``auto_release_confidence`` is exposed to instructors as a single dial:
     "auto-release everything I'd agree with 95% of the time".
+
+    The default is deliberately not cautious. A queue holding most of the class
+    is not a safety feature - it is the whole workload back on the lecturer,
+    and it gets the platform switched off. Escalation is reserved for the cases
+    where a human genuinely changes the answer: signals that contradict each
+    other, a similarity outlier, a report that does not match the code, a score
+    sitting on the pass mark, and anything the pipeline itself failed on.
+    Ordinary uncertainty is released with its evidence attached, and the student
+    can appeal any item.
     """
 
-    auto_release_confidence: float = 0.75
+    auto_release_confidence: float = 0.55
     similarity_escalate: float = 0.62
-    grade_boundary_epsilon: float = 0.015
-    grade_boundaries: tuple[float, ...] = (0.40, 0.50, 0.60, 0.70, 0.80, 0.90)
-    repair_penalty_escalate: float = 0.10
+    #: Only the pass mark. Being a point either side of a 70/80 boundary does
+    #: not change what happens to a student the way failing does, and treating
+    #: every band edge as a review trigger escalated a quarter of the cohort.
+    grade_boundary_epsilon: float = 0.02
+    grade_boundaries: tuple[float, ...] = (0.40,)
+    repair_penalty_escalate: float = 0.20
     high_weight_conflict_share: float = 0.15
 
 

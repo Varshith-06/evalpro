@@ -434,12 +434,22 @@ def test_gate_escalates_on_a_report_contradiction_without_penalising():
 
 
 def test_gate_escalates_near_a_grade_boundary():
-    item = aggregate_item(
+    """Only the pass/fail line is worth a human's time. A borderline mark there
+    changes whether the student repeats the lab; a borderline mark anywhere else
+    changes a letter, and reviewing every one of those buries the faculty."""
+    borderline = aggregate_item(
+        "rb_01", ["c_x"], 10.0, [Signal("test", 0.41, 1.0)], [],
+        {"declared_checks": ["test"], "test_pass_rate": 0.41},
+    )
+    decision = decide([borderline], {"similarity_max": 0.0, "contradictions": 0, "syntax_penalty": 0.0})
+    assert "grade_boundary" in decision.escalation_reasons
+
+    clear = aggregate_item(
         "rb_01", ["c_x"], 10.0, [Signal("test", 0.5, 1.0)], [],
         {"declared_checks": ["test"], "test_pass_rate": 0.5},
     )
-    decision = decide([item], {"similarity_max": 0.0, "contradictions": 0, "syntax_penalty": 0.0})
-    assert "grade_boundary" in decision.escalation_reasons
+    decision = decide([clear], {"similarity_max": 0.0, "contradictions": 0, "syntax_penalty": 0.0})
+    assert decision.escalation_reasons == []
 
 
 def test_syntax_penalty_is_applied_but_bounded():
