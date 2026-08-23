@@ -40,7 +40,7 @@ only way the demo means anything.
 The frontend needs no build step: no `npm install`, no bundler, no `node_modules`.
 
 ```bash
-python -m pytest              # from backend/ — engine, analytics, and end-to-end API tests
+python -m pytest              # 128 tests: engine, analytics, authoring, and end-to-end API
 python scripts/demo.py        # the 90-second narrative walkthrough
 python scripts/build_presentation.py   # regenerate the SIH deck from the official template
 ```
@@ -152,14 +152,18 @@ One screen per task, with a sidebar that changes by role.
 
 **The app opens as a student.** Use the **VIEW AS · Student / Faculty / Admin**
 switch at the top of the sidebar to change role — that is where *New assignment*
-and the review queue live. Sign in as anyone on
-the roster from the top-left picker, or deep-link with `?as=faculty`.
+and the review queue live. The picker below it chooses which person you are
+viewing as; `?as=faculty` in the URL does the same thing for a bookmark.
 
 | Role | Screens |
 |---|---|
-| **Student** | *My labs* — status and score per lab · *Lab* — read the brief, write and submit code, see previous attempts · *Feedback* — per-criterion marks with the specific reason for each, and a button to question any of them · *My progress* — topic map, what to revise next |
-| **Faculty** | *Assignments* — list, and **New assignment** · *To review* — the queue, most useful first · *Submission* — their code beside what each criterion found, approve or change a mark · *Class progress* — topics to go back over, who to check in with, which criteria are not working · *Common mistakes* — groups of students who got the same thing wrong |
+| **Student** | *My labs* — status and score per lab · *Lab* — read the brief, write or upload code, submit, see previous attempts · *Feedback* — per-criterion marks with the specific reason for each, and a button to question any of them · *My progress* — topic map, what to revise next |
+| **Faculty** | *Assignments* — the list, **New assignment**, and per assignment: everyone's submissions including who has not handed in, edit the criteria, publish/unpublish, re-mark, delete · *To review* — the queue, most useful first, then their code beside what each criterion found · *Marks* — the whole gradebook, exportable · *Class progress* — topics to go back over, who to check in with, which criteria are not working · *Common mistakes* — groups of students who got the same thing wrong |
 | **Administrator** | *Outcomes* — CO/PO attainment, exportable · *Students at risk* · *Integrity* · *System* — marking quality, fairness audit, sandbox status |
+
+The app shell is served `no-store`. It is a few kilobytes of unhashed files, and
+a cached `app.js` running last week's UI is indistinguishable from a missing
+feature.
 
 Student feedback is never "72/100". It is *"Empty-input handling: 0/8. Test 11
 crashed with IndexError at solution.py:14. No length guard found on the input
@@ -282,7 +286,7 @@ implementation specification this is built from.
 - **The sandbox on a developer machine is not a production boundary.** Layers 1,
   3, 5, 7 and 8 need a Linux host with KVM. The system reports exactly which
   layers it is missing rather than implying it has them.
-- **Auto-release coverage in the demo is about 30%**, not the 70% the spec
+- **Auto-release coverage in the demo is about 45%**, not the 70% the spec
   targets for semester 2. That is the honest cold-start number: the demo cohort
   is deliberately full of broken code, and the confidence estimator has three
   faculty overrides to learn from rather than three thousand.
@@ -293,4 +297,9 @@ implementation specification this is built from.
   deliberately language-agnostic so a tree-sitter backend drops in behind
   `build_code_graph` without touching anything downstream.
 - **The demo has no authentication.** Identity comes from the LTI launch in a
-  real deployment; the demo picks a user from the roster.
+  real deployment; the demo picks a user from the roster via the VIEW AS switch.
+- **The rubric editor sets a check's kind and target, not its parameters.**
+  Thresholds like `min_ratio` or `max_depth` keep whatever value they were
+  created with; changing one needs the API today.
+- **A student submits one file at a time through the editor.** Uploading a
+  `.zip` handles multi-file work, but the in-page editor is single-file.

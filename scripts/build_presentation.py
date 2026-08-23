@@ -19,8 +19,13 @@ Format decisions, and the reasoning:
   for slide titles, Arial for all body text, with the template's Wingdings and
   Arial bullet characters and its ``tx2`` heading colour.
 * **Body point sizes are reduced from the template's 28pt placeholders.** Real
-  content does not fit at 28pt in a box 1.5 inches tall. The typeface, colour,
-  bullet glyphs, alignment, and every other formatting property are unchanged.
+  content does not fit at 28pt in a box 1.5 inches tall. The typeface, colour
+  and bullet glyphs are unchanged.
+* **Body text is left-aligned, not justified.** The placeholders are justified,
+  which suits the long paragraphs they were written for and ruins short
+  bullets: justification stretches a one-line bullet across the full slide and
+  opens rivers of white space between the words. Ragged-right keeps word
+  spacing even, which is what reads well from the back of a room.
 
 Run with:  python scripts/build_presentation.py
 """
@@ -204,7 +209,7 @@ TEAM = {
     "team_name": "[Team Name as registered on the portal]",
 }
 
-IDEA_TITLE = "EvalPro - Programming Labs That Mark Themselves, and Explain Why"
+IDEA_TITLE = "EvalPro - Programming Labs That Mark Themselves"
 
 
 def build_title_slide(slide) -> None:
@@ -224,15 +229,17 @@ def build_title_slide(slide) -> None:
     ]
     for index, (label, value) in enumerate(fields):
         paragraph = frame.paragraphs[0] if index == 0 else frame.add_paragraph()
-        paragraph.alignment = PP_ALIGN.JUSTIFY
+        # Left, not justified: these lines are short enough that justification
+        # only opens gaps between the words.
+        paragraph.alignment = PP_ALIGN.LEFT
         label_run = paragraph.add_run()
         label_run.text = label
-        style_run(label_run, 15, bold=True, colour=BODY_BLACK)
+        style_run(label_run, 15.5, bold=True, colour=BODY_BLACK)
         value_run = paragraph.add_run()
         value_run.text = value
-        style_run(value_run, 15, bold=False, colour=HEADING_BLUE)
+        style_run(value_run, 15.5, bold=False, colour=HEADING_BLUE)
         set_bullet(paragraph, "•")
-        set_line_spacing(paragraph, 1.15, before=0, after=12)
+        set_line_spacing(paragraph, 1.12, before=0, after=14)
 
     # The template's own subtitle placeholder reads "TITLE PAGE"; it stays.
     subtitle = find(slide, "Subtitle 3")
@@ -246,16 +253,16 @@ def build_solution_slide(slide) -> None:
     title = find(slide, "Title 1")
     clear_text(title)
     add_line(
-        title.text_frame, IDEA_TITLE, size=27, bold=True, colour=HEADING_BLUE,
+        title.text_frame, IDEA_TITLE, size=24, bold=True, colour=HEADING_BLUE,
         font=TIMES, first=True, align=PP_ALIGN.LEFT,
     )
     # The template's team-name oval sits at x 0.36-1.73, so the title starts
     # clear of it rather than running underneath.
-    place(title, 1.88, 0.10, 8.55, 1.00)
+    place(title, 1.88, 0.22, 8.72, 0.80)
 
     box = find(slide, "TextBox 8")
     set_autofit_off(box)
-    place(box, 0.36, 1.26, 12.58, 5.50)
+    place(box, 0.36, 1.30, 12.58, 5.46)
     clear_text(box)
     frame = box.text_frame
 
@@ -263,91 +270,73 @@ def build_solution_slide(slide) -> None:
         frame,
         "Proposed Solution (Describe your Idea/Solution/Prototype)",
         size=20, bold=True, colour=HEADING_BLUE, underline=True,
-        bullet="v", bullet_font="Wingdings", first=True, after=10,
+        bullet="v", bullet_font="Wingdings", first=True, after=11,
     )
 
     sections = [
         (
             "Detailed explanation of the proposed solution",
             [
-                "A student submits their lab program. The platform runs it, marks it, and shows them "
-                "exactly why they got each mark.",
-                "It does not stop at a number. Each mark is linked to a topic - loops, recursion, "
-                "error handling - so the student sees which topic they are weak on, not just which lab.",
-                "Marks from every lab add up over the semester into a clear picture of what each "
-                "student actually understands.",
+                "A student submits their lab program. It is run, marked, and every mark is explained.",
+                "Each mark is tied to a topic, so a student sees which topic is weak - not just which lab.",
+                "Those marks add up across the semester into a picture of what each student understands.",
             ],
         ),
         (
             "How it addresses the problem",
             [
-                "Collects the academic information: labs, submissions and class lists, straight from "
-                "the college's existing Moodle or Google Classroom.",
-                "Analyses it four ways: each submission, each student over time, each question, and "
-                "the class as a whole.",
-                "Gives everyone a next step: what a student should revise, what a teacher should "
-                "explain again, which students need support.",
-                "Shows it on one simple screen per person - one for students, one for teachers, one "
-                "for the department.",
+                "Collects labs, submissions and class lists from the college's existing system.",
+                "Analyses each submission, each student, each question and the whole class.",
+                "Tells students what to revise, and teachers what to explain again.",
             ],
         ),
         (
             "Innovation and uniqueness of the solution",
             [
-                "A missing bracket costs two marks, not the whole lab. We find the smallest fix that "
-                "makes the program run, then mark the rest of the work properly.",
-                "The answer key never goes near the student's program, so it cannot be copied, "
-                "guessed or hard-coded.",
-                "It also marks the question paper. If the strongest students all fail one part, the "
-                "question was probably unclear, and the teacher is told.",
-                "When it is not sure, it says so and hands the submission to the teacher instead of "
-                "guessing.",
+                "A missing bracket costs two marks, not the whole lab.",
+                "The answer key never touches the student's program, so it cannot be copied.",
+                "It marks the question paper too - unclear questions are flagged to the teacher.",
+                "When it is unsure, it says so and hands the work to a human.",
             ],
         ),
     ]
-    _render_sections(frame, sections, heading_size=17, body_size=14)
+    _render_sections(frame, sections, heading_size=18, body_size=16,
+                     section_gap=20, bullet_gap=6, line=1.12)
 
 
 def build_technical_slide(slide) -> None:
     box = find(slide, "TextBox 8")
     set_autofit_off(box)
-    place(box, 0.36, 3.62, 12.58, 3.20)
+    place(box, 0.36, 3.62, 12.58, 3.18)
     clear_text(box)
     frame = box.text_frame
 
     add_line(
         frame,
         "Technologies to be used (e.g. programming languages, frameworks, hardware)",
-        size=16, bold=True, colour=HEADING_BLUE, underline=True,
-        bullet="v", bullet_font="Wingdings", first=True, after=5,
+        size=15, bold=True, colour=HEADING_BLUE, underline=True,
+        bullet="v", bullet_font="Wingdings", first=True, after=6,
     )
     for text in [
-        "Python and FastAPI on the server. A plain web interface that works in any browser, with "
-        "nothing to install on a student's machine.",
-        "Student programs run inside a locked-down sandbox, so nothing they submit can touch the "
-        "college's systems or see anyone else's work.",
-        "Well-established methods do the marking: standard program analysis, the same plagiarism "
-        "technique universities already use, and a well-known model for tracking what a learner knows.",
-        "Runs on an ordinary computer. No expensive hardware, no paid AI service needed to mark a "
-        "submission.",
+        "Python and FastAPI, with a plain web interface that runs in any browser.",
+        "Student programs run inside a sealed sandbox, away from college systems.",
+        "Proven methods for marking, plagiarism checking and tracking what a learner knows.",
+        "Ordinary hardware - no GPU, and no paid AI service to mark a submission.",
     ]:
-        add_line(frame, text, size=13.5, bullet="•", indent=0.12, spacing=0.95, after=3,
-                 align=PP_ALIGN.JUSTIFY)
+        add_line(frame, text, size=13.5, bullet="•", indent=0.12, spacing=1.06, after=4)
 
     add_line(
         frame,
         "Methodology and process for implementation (Flow Charts/Images/ working prototype)",
-        size=16, bold=True, colour=HEADING_BLUE, underline=True,
-        bullet="v", bullet_font="Wingdings", before=10, after=5,
+        size=15, bold=True, colour=HEADING_BLUE, underline=True,
+        bullet="v", bullet_font="Wingdings", before=11, after=6,
     )
     for text in [
-        "The teacher writes the lab question in ordinary English. The platform reads it and works "
-        "out what it can check - and shows the teacher that list before anything is published.",
-        "Working prototype today: a full class of 24 students across four labs, marked from start "
-        "to finish, with every screen above already built.",
+        "The teacher writes the question in plain English; the platform shows what it will check "
+        "before anything is published.",
+        "Working prototype: a class of 24 students across four labs, marked end to end.",
     ]:
-        add_line(frame, text, size=13.5, bullet="•", indent=0.12, spacing=0.95, after=3,
-                 align=PP_ALIGN.JUSTIFY)
+        add_line(frame, text, size=13.5, bullet="•", indent=0.12, spacing=1.06, after=4)
 
     _draw_architecture(slide)
 
@@ -355,7 +344,7 @@ def build_technical_slide(slide) -> None:
 def build_feasibility_slide(slide) -> None:
     box = find(slide, "TextBox 8")
     set_autofit_off(box)
-    place(box, 0.36, 1.26, 12.58, 4.66)
+    place(box, 0.36, 1.30, 12.58, 4.60)
     clear_text(box)
     frame = box.text_frame
 
@@ -364,47 +353,43 @@ def build_feasibility_slide(slide) -> None:
             "Analysis of the feasibility of the idea",
             [
                 "It already works. Nothing here waits on a research breakthrough.",
-                "It runs on a normal laptop or a small college server, and setting up one lab takes "
-                "a teacher about ten minutes.",
-                "It fits into the tools a college already uses, so marks go back into the existing "
-                "gradebook automatically.",
+                "Runs on a normal laptop or a small college server.",
+                "Fits the tools a college already uses, so marks return to the existing gradebook.",
             ],
         ),
         (
             "Potential challenges and risks",
             [
-                "Student programs are run on our machine, and some of them will be badly behaved.",
-                "Automatic marking can get things wrong, and a wrong mark destroys trust quickly.",
-                "Wrongly accusing a student of copying is the most damaging mistake the system could make.",
-                "Teachers will abandon anything that costs them more time than it saves.",
+                "Running students' programs safely on our own machine.",
+                "A wrong automatic mark loses a class's trust very quickly.",
+                "Wrongly accusing a student of copying.",
+                "Teachers abandoning anything that costs more time than it saves.",
             ],
         ),
         (
             "Strategies for overcoming these challenges",
             [
-                "Every program runs sealed off from everything else, and is thrown away afterwards.",
-                "The system knows when it is unsure and sends those submissions to the teacher. "
-                "Students can question any mark and get a human answer.",
-                "For copying, it only shows the overlapping lines side by side. The judgement stays "
-                "with the teacher - the platform never accuses anyone.",
-                "Set-up is ten minutes, marks flow back into the existing gradebook, and every "
-                "correction a teacher makes teaches the system to do better next time.",
+                "Every program runs sealed off from everything else, then is destroyed.",
+                "Unsure work goes to the teacher, and any student can question any mark.",
+                "For copying we show the matching lines only. The teacher decides.",
+                "Ten-minute setup, and every correction a teacher makes trains the system.",
             ],
         ),
     ]
-    _render_sections(frame, sections, heading_size=17, body_size=14)
+    _render_sections(frame, sections, heading_size=16, body_size=13.5,
+                     section_gap=13, bullet_gap=4, line=1.06)
 
     metric_strip(slide, [
-        ("Already built", "a full class of 24 students and four labs, marked end to end"),
+        ("Already built", "a class of 24 students and four labs, marked end to end"),
         ("~10 minutes", "for a teacher to set up one lab"),
-        ("No extra cost", "runs on ordinary hardware, no paid AI service to mark work"),
+        ("No extra cost", "ordinary hardware, no paid AI service"),
     ])
 
 
 def build_impact_slide(slide) -> None:
     box = find(slide, "TextBox 8")
     set_autofit_off(box)
-    place(box, 0.36, 1.26, 12.58, 5.50)
+    place(box, 0.36, 1.52, 12.58, 5.24)
     clear_text(box)
     frame = box.text_frame
 
@@ -412,76 +397,66 @@ def build_impact_slide(slide) -> None:
         (
             "Potential impact on the target audience",
             [
-                "Students stop guessing why they lost marks. Instead of \"72/100\" they see \"your "
-                "program crashes when the list is empty\" - and which topic to revise because of it.",
-                "Teachers get their marking hours back, and get told what the class did not "
-                "understand while there is still time to teach it again.",
-                "Heads of department see how the course is performing against its stated outcomes, "
-                "live, instead of reconstructing it at the end of the year.",
+                "Students see “your program crashes on an empty list” instead of “72/100”.",
+                "Teachers get their marking hours back, and hear what the class missed in time to "
+                "teach it again.",
+                "Departments get NBA and NAAC outcome reports that are always up to date.",
             ],
         ),
         (
             "Benefits of the solution (social, economic, environmental, etc.)",
             [
-                "Fairer marking. Every student is marked to the same standard, every mark comes with "
-                "a reason, and any student can question any mark.",
-                "Time and cost saved. Marking a lab of sixty students goes from an evening's work to "
-                "reviewing the handful the system was unsure about.",
-                "Accreditation reporting for NBA and NAAC, which takes weeks of manual work today, "
-                "becomes a report that is always up to date.",
-                "Weaker students are spotted early and offered help, rather than discovered at the "
-                "end of the semester when nothing can be done.",
+                "Fairer - one standard for everyone, every mark has a reason, every mark can be "
+                "questioned.",
+                "Cheaper - an evening of marking becomes reviewing the few cases the system flagged.",
+                "Earlier - struggling students are found while something can still be done about it.",
+                "Lasting - what a class got wrong this year improves how it is taught next year.",
             ],
         ),
     ]
-    _render_sections(frame, sections, heading_size=17, body_size=15)
+    _render_sections(frame, sections, heading_size=20, body_size=17.5,
+                     section_gap=34, bullet_gap=13, line=1.18)
 
 
 def build_references_slide(slide) -> None:
     box = find(slide, "TextBox 8")
     set_autofit_off(box)
-    place(box, 0.36, 1.26, 12.58, 4.66)
+    place(box, 0.36, 1.30, 12.58, 4.60)
     clear_text(box)
     frame = box.text_frame
 
     add_line(
         frame, "Details / Links of the reference and research work",
-        size=17, bold=True, colour=HEADING_BLUE, underline=True,
-        bullet="v", bullet_font="Wingdings", after=9,
+        size=16, bold=True, colour=HEADING_BLUE, underline=True,
+        bullet="v", bullet_font="Wingdings", after=10,
     )
 
     groups = [
         ("Checking for copied code", [
-            "Schleimer, Wilkerson & Aiken, \"Winnowing: Local Algorithms for Document "
-            "Fingerprinting\", ACM SIGMOD 2003 - the method behind MOSS, used by universities "
-            "worldwide.",
+            "Schleimer, Wilkerson & Aiken, “Winnowing: Local Algorithms for Document "
+            "Fingerprinting”, ACM SIGMOD 2003 - the method behind MOSS.",
         ]),
         ("Tracking what a student knows", [
-            "Corbett & Anderson, \"Knowledge Tracing\", User Modeling and User-Adapted Interaction, "
-            "1994 - the standard model for estimating mastery from performance.",
-            "Ebel & Frisbie, Essentials of Educational Measurement - the classical way to tell a "
-            "good exam question from a bad one.",
+            "Corbett & Anderson, “Knowledge Tracing”, User Modeling and User-Adapted "
+            "Interaction, 1994.",
+            "Ebel & Frisbie, Essentials of Educational Measurement - telling a good exam question "
+            "from a bad one.",
         ]),
         ("Marking programs automatically", [
-            "Gulwani, Radicek & Zuleger, \"Automated Clustering and Program Repair for Introductory "
-            "Programming Assignments\", PLDI 2018 - the basis for giving partial credit instead of "
-            "a zero.",
-            "tree-sitter - the parser used to understand student code even when it does not compile.",
+            "Gulwani, Radicek & Zuleger, “Automated Clustering and Program Repair for "
+            "Introductory Programming Assignments”, PLDI 2018.",
+            "tree-sitter - the parser used to read student code even when it does not compile.",
         ]),
-        ("Running untrusted code safely", [
-            "Agache et al., \"Firecracker: Lightweight Virtualization\", USENIX NSDI 2020.",
-        ]),
-        ("Standards we build to", [
-            "1EdTech Learning Tools Interoperability 1.3 - how the platform plugs into Moodle and "
-            "Google Classroom.",
-            "National Board of Accreditation (India) - the CO-PO attainment rules the reports follow.",
+        ("Running untrusted code, and the standards we build to", [
+            "Agache et al., “Firecracker: Lightweight Virtualization”, USENIX NSDI 2020.",
+            "1EdTech LTI 1.3 for Moodle and Google Classroom; NBA (India) for the CO-PO reports.",
         ]),
     ]
     for heading, entries in groups:
-        add_line(frame, heading, size=14, bold=True, colour=ACCENT_BLUE,
-                 bullet="•", indent=0.0, spacing=0.95, before=5, after=2)
+        add_line(frame, heading, size=15, bold=True, colour=ACCENT_BLUE,
+                 bullet="•", indent=0.0, spacing=1.06, before=13, after=5)
         for entry in entries:
-            add_line(frame, entry, size=12.5, bullet="–", indent=0.30, spacing=0.95, after=3)
+            add_line(frame, entry, size=13, bullet="–", indent=0.30, spacing=1.08, after=5)
     drop_empty_paragraphs(frame)
 
     footer = slide.shapes.add_textbox(Inches(0.34), Inches(6.08), Inches(12.66), Inches(0.62))
@@ -496,7 +471,7 @@ def build_references_slide(slide) -> None:
         footer.text_frame,
         "Working prototype and source code: github.com/Varshith-06/evalpro",
         size=13, bold=True, colour=LAYER_FILL, bullet=None, align=PP_ALIGN.CENTER,
-        first=True, spacing=0.95,
+        first=True, spacing=1.0,
     )
 
 
@@ -525,23 +500,39 @@ def metric_strip(slide, items: list[tuple[str, str]], top: float = 6.02, height:
         frame.word_wrap = True
         frame.vertical_anchor = MSO_ANCHOR.MIDDLE
         add_line(frame, figure, size=16, bold=True, colour=LAYER_FILL, bullet=None,
-                 align=PP_ALIGN.CENTER, first=True, spacing=0.9)
+                 align=PP_ALIGN.CENTER, first=True, spacing=1.0)
         add_line(frame, caption, size=10, colour=BODY_BLACK, bullet=None,
-                 align=PP_ALIGN.CENTER, spacing=0.88)
+                 align=PP_ALIGN.CENTER, spacing=1.04)
 
 
-def _render_sections(frame, sections, heading_size: float, body_size: float) -> None:
-    """Pointer heading (preserved verbatim from the template) then the content."""
+def _render_sections(
+    frame,
+    sections,
+    heading_size: float,
+    body_size: float,
+    section_gap: float = 14.0,
+    bullet_gap: float = 5.0,
+    line: float = 1.08,
+) -> None:
+    """Pointer heading (preserved verbatim from the template) then the content.
+
+    Body text is left-aligned, not justified. The template's placeholders are
+    justified, which is fine for the long paragraphs they contain and wrong for
+    short bullets: justification stretches a one-line bullet across the full
+    slide width and opens rivers of white space between words. Ragged-right
+    keeps the word spacing even, which is what actually reads well from the back
+    of a room.
+    """
     for heading, bullets in sections:
         add_line(
             frame, heading, size=heading_size, bold=True, colour=HEADING_BLUE,
             underline=True, bullet="v", bullet_font="Wingdings",
-            before=7, after=3, align=PP_ALIGN.LEFT,
+            before=section_gap, after=6, align=PP_ALIGN.LEFT, spacing=1.0,
         )
         for text in bullets:
             add_line(
                 frame, text, size=body_size, bullet="•", indent=0.12,
-                spacing=0.95, after=2, align=PP_ALIGN.JUSTIFY,
+                spacing=line, after=bullet_gap, align=PP_ALIGN.LEFT,
             )
 
 
@@ -577,10 +568,10 @@ def _draw_architecture(slide) -> None:
         frame.vertical_anchor = MSO_ANCHOR.MIDDLE
         set_autofit_off(box)
         clear_text(box)
-        add_line(frame, title, size=10.5, bold=True, colour=WHITE,
-                 bullet=None, align=PP_ALIGN.CENTER, first=True, spacing=0.95, after=3)
-        add_line(frame, body, size=8.5, colour=WHITE, bullet=None,
-                 align=PP_ALIGN.CENTER, spacing=0.9)
+        add_line(frame, title, size=11, bold=True, colour=WHITE,
+                 bullet=None, align=PP_ALIGN.CENTER, first=True, spacing=1.0, after=4)
+        add_line(frame, body, size=9.5, colour=WHITE, bullet=None,
+                 align=PP_ALIGN.CENTER, spacing=1.06)
 
         if index < len(LAYERS) - 1:
             arrow_left = Emu(int(x) + int(width))
@@ -602,8 +593,8 @@ def _draw_architecture(slide) -> None:
         caption.text_frame,
         "Every mark is tied to a topic. That one link is what turns a pile of lab marks into a picture "
         "of what a student actually understands.",
-        size=11, bold=True, colour=HEADING_BLUE, bullet=None, first=True,
-        align=PP_ALIGN.CENTER, spacing=0.95,
+        size=11.5, bold=True, colour=HEADING_BLUE, bullet=None, first=True,
+        align=PP_ALIGN.CENTER, spacing=1.04,
     )
 
 
