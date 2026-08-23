@@ -1,0 +1,16 @@
+# Normalise line endings in the repository so a checkout is identical on every
+# platform. This matters here beyond tidiness: the content hash that gives the
+# grader its idempotency is taken over normalised source, and a repository that
+# stores CRLF on one machine and LF on another makes reproducibility harder to
+# reason about than it needs to be.
+* text=auto eol=lf
+
+*.ps1 text eol=crlf
+*.sh  text eol=lf
+
+*.pptx binary
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.pdf  binary
+*.db   binary

@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>EvalPro — Automated Programming Lab Evaluation</title>
+  <link rel="stylesheet" href="/static/css/app.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>◈</text></svg>" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark">◈</span>
+      <div>
+        <div class="brand-name">EvalPro</div>
+        <div class="brand-sub">Academic analytics with an automated grader as its sensor</div>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <label class="field">
+        <span>Course</span>
+        <select id="course-select"></select>
+      </label>
+      <nav class="roles" id="role-nav">
+        <button class="role-btn active" data-role="student">Student</button>
+        <button class="role-btn" data-role="faculty">Faculty</button>
+        <button class="role-btn" data-role="admin">Administrator</button>
+      </nav>
+    </div>
+  </header>
+
+  <main id="view" class="view">
+    <div class="loading">Loading…</div>
+  </main>
+
+  <div id="drawer" class="drawer" hidden>
+    <div class="drawer-scrim" data-close></div>
+    <aside class="drawer-panel">
+      <button class="drawer-close" data-close aria-label="Close">×</button>
+      <div id="drawer-body"></div>
+    </aside>
+  </div>
+
+  <footer class="footer">
+    <span>Pipeline evidence is reproducible: every run pins its pipeline and model versions.</span>
+    <span id="footer-health"></span>
+  </footer>
+
+  <script type="module" src="/static/js/app.js"></script>
+</body>
+</html>
