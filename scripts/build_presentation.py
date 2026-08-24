@@ -54,6 +54,7 @@ ACCENT_BLUE = RGBColor(0x00, 0x70, 0xC0)    # the footer bar colour
 LAYER_FILL = RGBColor(0x1F, 0x49, 0x7D)
 LAYER_FILL_ALT = RGBColor(0x4F, 0x81, 0xBD)  # theme accent1
 WHITE = RGBColor(0xFF, 0xFF, 0xFF)
+MUTED = RGBColor(0x5A, 0x5A, 0x5A)     # models designed but not yet trained
 
 ARIAL = "Arial"
 TIMES = "Times New Roman"
@@ -311,35 +312,41 @@ def build_solution_slide(slide) -> None:
 def build_technical_slide(slide) -> None:
     box = find(slide, "TextBox 8")
     set_autofit_off(box)
-    place(box, 0.36, 3.62, 12.58, 3.18)
+    place(box, 0.36, 2.72, 12.58, 1.28)
     clear_text(box)
     frame = box.text_frame
 
     add_line(
         frame,
         "Technologies to be used (e.g. programming languages, frameworks, hardware)",
-        size=15, bold=True, colour=HEADING_BLUE, underline=True,
-        bullet="v", bullet_font="Wingdings", first=True, after=6,
+        size=14, bold=True, colour=HEADING_BLUE, underline=True,
+        bullet="v", bullet_font="Wingdings", first=True, after=5,
     )
     for text in [
         "Python and FastAPI, with a plain web interface that runs in any browser.",
         "Student programs run inside a sealed sandbox, away from college systems.",
-        "Proven methods for marking, plagiarism checking and tracking what a learner knows.",
-        "Ordinary hardware - no GPU, and no paid AI service to mark a submission.",
+        "Ordinary hardware - no GPU, and no AI cost per submission marked.",
     ]:
-        add_line(frame, text, size=13.5, bullet="•", indent=0.12, spacing=1.06, after=4)
+        add_line(frame, text, size=12.5, bullet="•", indent=0.12, spacing=1.04, after=2)
+
+    _draw_model_table(slide, 3.88)
+
+    lower = slide.shapes.add_textbox(Inches(0.36), Inches(6.06), Inches(12.58), Inches(0.86))
+    set_autofit_off(lower)
+    clear_text(lower)
+    frame = lower.text_frame
 
     add_line(
         frame,
         "Methodology and process for implementation (Flow Charts/Images/ working prototype)",
-        size=15, bold=True, colour=HEADING_BLUE, underline=True,
-        bullet="v", bullet_font="Wingdings", before=11, after=6,
+        size=14, bold=True, colour=HEADING_BLUE, underline=True,
+        bullet="v", bullet_font="Wingdings", first=True, after=5,
     )
     for text in [
-        "Before publishing, the teacher sees exactly what will be checked, and can change any of it.",
+        "Teacher approves the topic map and the rubric; both are drafted for them, neither is imposed.",
         "Working prototype: a class of 24 students across four labs, marked end to end.",
     ]:
-        add_line(frame, text, size=13.5, bullet="•", indent=0.12, spacing=1.06, after=4)
+        add_line(frame, text, size=12.5, bullet="•", indent=0.12, spacing=1.04, after=2)
 
     _draw_architecture(slide)
 
@@ -539,6 +546,69 @@ def _render_sections(
             )
 
 
+
+# --------------------------------------------------------------------------
+# The model stack, as three aligned columns
+# --------------------------------------------------------------------------
+# The distinction that matters is learned-from-data versus hand-written rules.
+# Every slot below runs today; only the bold ones learn. Saying "running" would
+# blur that, since every unlearned slot has a deterministic stand-in behind the
+# same interface.
+MODELS = [
+    ("Confidence estimator", "which marks are safe to release without a teacher",
+     "every mark a teacher corrects, forever", True),
+    ("Knowledge tracing", "what each student knows, topic by topic",
+     "the stream of marks itself - no labelling", True),
+    ("Misconception clustering", "the few mistakes the whole class is making",
+     "unsupervised - works from day one", True),
+    ("Copy detector", "copies that renaming and reordering hide",
+     "self-supervised: copies made by renaming", False),
+    ("Algorithm identifier", "which method the student actually used",
+     "reference solutions and teacher tags", False),
+    ("Report checker", "whether the write-up matches the code",
+     "AI drafts labels, teachers correct, then distil", False),
+    ("Early warning", "who is slipping behind, and why",
+     "past outcomes, bias-audited before release", False),
+    ("Language detector", "what it is written in and how to run it",
+     "auto-labelled from any code corpus", False),
+]
+
+COLUMNS = ((0.50, 2.40), (2.90, 3.60), (6.60, 5.30))
+
+
+def _draw_model_table(slide, top: float) -> None:
+    headers = ("Model", "What it decides", "How it is trained")
+    row = 0.182
+
+    for (left, width), header in zip(COLUMNS, headers):
+        box = slide.shapes.add_textbox(Inches(left), Inches(top), Inches(width),
+                                       Inches(row * (len(MODELS) + 1) + 0.10))
+        set_autofit_off(box)
+        clear_text(box)
+        frame = box.text_frame
+        frame.word_wrap = True
+        add_line(frame, header, size=10, bold=True, colour=ACCENT_BLUE,
+                 bullet=None, first=True, spacing=1.0, after=3)
+        for index, entry in enumerate(MODELS):
+            live = entry[3]
+            add_line(frame, entry[headers.index(header)], size=9.5,
+                     bold=live and header == "Model",
+                     colour=BODY_BLACK if live else MUTED,
+                     bullet=None, spacing=1.0, after=1.5)
+
+    note = slide.shapes.add_textbox(Inches(0.50), Inches(top + row * (len(MODELS) + 1) + 0.12),
+                                    Inches(12.10), Inches(0.24))
+    set_autofit_off(note)
+    clear_text(note)
+    add_line(
+        note.text_frame,
+        "Bold: learns from data already. The rest run on hand-written rules until a semester of use "
+        "supplies labels - same interface either way, so swapping a model in changes one file. "
+        "The AI drafts and labels; it never marks a submission.",
+        size=9.5, bold=False, colour=HEADING_BLUE, bullet=None, first=True, spacing=1.0,
+    )
+
+
 # ==========================================================================
 # Architecture diagram, drawn as native shapes
 # ==========================================================================
@@ -551,8 +621,8 @@ LAYERS = [
 
 
 def _draw_architecture(slide) -> None:
-    top = Inches(1.22)
-    height = Inches(1.62)
+    top = Inches(1.14)
+    height = Inches(1.06)
     left = Inches(0.36)
     width = Inches(2.86)
     gap = Inches(0.32)
@@ -594,8 +664,8 @@ def _draw_architecture(slide) -> None:
     clear_text(caption)
     add_line(
         caption.text_frame,
-        "Every mark is tied to a topic. That one link is what turns a pile of lab marks into a picture "
-        "of what a student actually understands.",
+        "Every mark is tied to a topic, and topics are linked into a prerequisite map - drafted from the "
+        "syllabus, approved by the teacher. The system walks it to find the root gap, not the symptom.",
         size=11.5, bold=True, colour=HEADING_BLUE, bullet=None, first=True,
         align=PP_ALIGN.CENTER, spacing=1.04,
     )

@@ -86,7 +86,7 @@ becomes computable.
 | Principle | Where it is enforced |
 |---|---|
 | **Evidence, not scores** — the primary output is a defensible evidence trail; the score is derived from it | Every stage writes `StageResult.evidence`; only `b7_gate` produces a number |
-| **Deterministic first, learned second, LLM last** | `b1`–`b5` are parsers and test runners; the LLM appears only in `services/authoring_service.py`, once per *assignment* |
+| **Deterministic first, learned second, LLM last** | `b1`–`b5` are parsers and test runners. The LLM has exactly one seat — the `Drafter` protocol in `services/authoring_service.py`, called once per *assignment*, never per submission. This build ships `HeuristicDrafter`, so it currently makes **no model calls at all**: nothing in `backend/app` opens a network connection |
 | **Abstain rather than guess** | `b7_gate.decide` — coverage is a tunable dial, not a fixed property |
 | **Reproducible forever** | `EvaluationRun` pins `pipeline_version` and `model_versions`; seeds derive from `(assignment_id, attempt_id)`; the sandbox freezes `PYTHONHASHSEED` |
 | **Adversarial by default** | `engine/sandbox.py` and the catalogue in `docs/SECURITY.md` |
@@ -300,7 +300,15 @@ implementation specification this is built from.
 
 - **The sandbox on a developer machine is not a production boundary.** Layers 1,
   3, 5, 7 and 8 need a Linux host with KVM. The system reports exactly which
-  layers it is missing rather than implying it has them.
+  layers it is missing rather than implying it has them. Measured on Windows 11:
+  **5 of 13 layers applied** — even the POSIX rlimits at layer 6 are unavailable.
+  Probing it with deliberately hostile code confirms what that means: sandboxed
+  code **can open network sockets, read the repository including its own source,
+  and write anywhere the account can write**. What holds on every host is the
+  part that protects *grades* rather than the machine — the expected output never
+  enters the guest, every job gets a one-shot directory, the wall-clock kill
+  comes from a supervisor outside the guest, and the environment is scrubbed to
+  15 variables. Run it on untrusted code only under the Linux backend.
 - **Auto-release coverage in the demo is about 60%**, not the 70% the spec
   targets for semester 2. That is the honest cold-start number: the demo cohort
   is deliberately full of broken code, and the confidence estimator has three
