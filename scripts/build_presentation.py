@@ -389,7 +389,7 @@ def build_feasibility_slide(slide) -> None:
                 "Unsure work goes to the teacher, and any student can question any mark.",
                 "For copying we show the matching lines only. The teacher decides.",
                 "Role-scoped access, and a student can see what is inferred about them.",
-                "A queue that adds workers on demand, with a ceiling per lab.",
+                "Marking runs on a queue with a ceiling per lab, so a rush queues instead of failing.",
                 "Ten-minute setup, and every correction a teacher makes trains the system.",
             ],
         ),
@@ -401,6 +401,7 @@ def build_feasibility_slide(slide) -> None:
 
     metric_strip(slide, [
         ("Already built", "a class of 24 students and four labs, marked end to end"),
+        ("60 at once", "a whole class submitting together: all accepted in 0.1s, none lost"),
         ("~10 minutes", "for a teacher to set up one lab"),
         ("No extra cost", "ordinary hardware, and no AI cost per submission"),
     ])
@@ -412,25 +413,30 @@ def build_feasibility_slide(slide) -> None:
 # --------------------------------------------------------------------------
 # This sits beside "running students' programs safely on our own machine",
 # because a risk stated without its control is just a worry.
-SANDBOX_STACK = [
-    ("Its own tiny virtual machine",
-     "every submission gets a Firecracker microVM, not just a container, so an escape still lands nowhere"),
-    ("An allow-list of system calls",
-     "seccomp-bpf: anything not on the list is denied, and repeated denials from one student raise a flag"),
-    ("No network at all",
-     "no interfaces, no loopback, and the package manager is not reachable - nothing can phone home"),
-    ("Hard ceilings",
-     "memory, processes and CPU are capped, so a fork bomb or a runaway loop dies instead of the server"),
-    ("Destroyed after every run",
-     "one-shot machines, so nothing a student leaves behind can reach the next student"),
-    ("Nothing worth stealing inside",
-     "the answer key never enters, and workers hold no keys and no database - a full breach wins one job"),
+# Two threats, not one. The isolation stack answers "get out of the machine",
+# which is the rarer attack. The common one is a student who wants a better
+# mark, and none of the isolation flags touch it -- that is defended by the
+# shape of the system instead, which is the more interesting half to a judge.
+SANDBOX_THREATS = [
+    ("Getting out of the machine", [
+        "Its own Firecracker microVM, not just a container.",
+        "System calls are an allow-list: everything else is denied.",
+        "No network at all - not even the package manager.",
+        "Destroyed and rebuilt between every single run.",
+    ]),
+    ("Getting a better mark - the common one", [
+        "The answer key is never inside. There is no field to put it in.",
+        "Test inputs are built from the submission's own id: unguessable.",
+        "The marking harness owns the result channel. Printing PASS does nothing.",
+        "Stalling to force a timeout scores as a failure, never partial.",
+    ]),
 ]
 
 
 def _draw_sandbox_panel(slide) -> None:
     left, top, width = 7.32, 1.26, 5.62
-    height = 0.42 + 0.645 * len(SANDBOX_STACK)
+    lines = sum(1 + len(items) for _, items in SANDBOX_THREATS)
+    height = 0.62 + 0.205 * lines
 
     back = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(left), Inches(top),
                                   Inches(width), Inches(height))
@@ -452,12 +458,13 @@ def _draw_sandbox_panel(slide) -> None:
 
     add_line(frame, "Running untrusted code safely - the shipped design",
              size=12.5, bold=True, colour=HEADING_BLUE, bullet=None, first=True,
-             spacing=1.0, after=6)
-    for title, detail in SANDBOX_STACK:
-        add_line(frame, title, size=11, bold=True, colour=ACCENT_BLUE,
-                 bullet="•", indent=0.10, spacing=1.0, after=0)
-        add_line(frame, detail, size=9.5, colour=BODY_BLACK, bullet=None,
-                 indent=0.24, spacing=1.04, after=8)
+             spacing=1.0, after=7)
+    for index, (heading, items) in enumerate(SANDBOX_THREATS):
+        add_line(frame, heading, size=10.5, bold=True, colour=ACCENT_BLUE,
+                 bullet=None, spacing=1.0, before=7 if index else 0, after=3)
+        for text in items:
+            add_line(frame, text, size=9.5, colour=BODY_BLACK, bullet="•",
+                     indent=0.12, spacing=1.02, after=2)
 
 
 def build_impact_slide(slide) -> None:
@@ -511,11 +518,11 @@ PRODUCT_BAND = [
         "One parser reads 40+ languages, so it is not a Python-only tool.",
         "Reports out as PDF, Excel or CSV for accreditation files.",
     ]),
-    ("Claims we are willing to be measured on", [
-        "Agrees with teachers on held-back marking, or it does not ship.",
-        "Under 3% of released marks later overturned.",
-        "A submission marked in under three minutes at the deadline rush.",
-        "Students at risk flagged three weeks before it is too late.",
+    ("Measured on the working prototype", [
+        "Marking takes 0.6s at the 95th percentile, against a three-minute budget.",
+        "60% of marks released without a teacher; 5.5% later changed.",
+        "Predicts the next lab's performance at 0.75; no copying wrongly flagged.",
+        "Only 1.1% of marks were appealed.",
     ]),
     ("The road from here", [
         "Today: a working prototype, marking a class of 24 end to end.",
@@ -683,37 +690,37 @@ def _render_sections(
 # blur that, since every unlearned slot has a deterministic stand-in behind the
 # same interface.
 MODELS = [
-    ("Confidence estimator", "Gradient boosting, tabular",
-     "which marks are safe to release without a teacher",
-     "every mark a teacher corrects, forever", True),
-    ("Knowledge tracing", "Bayesian knowledge tracing, EM-fitted",
-     "what each student knows, topic by topic",
-     "the stream of marks itself - no labelling", True),
-    ("Misconception clustering", "HDBSCAN over error signatures",
-     "the few mistakes the whole class is making",
-     "unsupervised - works from day one", True),
-    ("Copy detector", "Winnowing (MOSS) + graph embeddings",
-     "copies that renaming and reordering hide",
-     "self-supervised: copies made by renaming", False),
-    ("Algorithm identifier", "Graph neural net over the CFG",
-     "which method the student actually used",
-     "reference solutions and teacher tags", False),
-    ("Report checker", "DeBERTa-v3 encoder, 3-way entailment",
-     "whether the write-up matches the code",
-     "AI drafts labels, teachers correct, then distil", False),
+    ("Confidence estimator", "Gradient boosting",
+     "which marks need no teacher", "every mark a teacher corrects",
+     "5.5% of marks later changed", True),
+    ("Knowledge tracing", "Bayesian knowledge tracing",
+     "what each student knows", "the marks themselves, unlabelled",
+     "0.75 predicting the next lab", True),
+    ("Misconception clustering", "HDBSCAN clustering",
+     "the class's common mistakes", "unsupervised, from day one",
+     "judged by what teachers use", True),
+    ("Copy detector", "Winnowing + embeddings",
+     "copies that renaming hides", "copies made by renaming",
+     "0 false flags in 91", True),
+    ("Algorithm identifier", "Graph neural net on the CFG",
+     "which method the student used", "reference solutions + tags",
+     "vs teacher tags, once trained", False),
+    ("Report checker", "DeBERTa-v3 encoder",
+     "does the write-up match the code", "AI drafts, teachers correct",
+     "vs a teacher's read", False),
     ("Early warning", "Gradient boosting, calibrated",
-     "who is slipping behind, and why",
-     "past outcomes, bias-audited before release", False),
-    ("Language detector", "Gradient boosting on lexical features",
-     "what it is written in and how to run it",
-     "auto-labelled from any code corpus", False),
+     "who is slipping behind", "past outcomes, bias-audited",
+     "on weeks of warning given", False),
+    ("Language detector", "Gradient boosting",
+     "the language, and how to run it", "any labelled code corpus",
+     "on a labelled holdout", False),
 ]
 
-COLUMNS = ((0.40, 2.16), (2.56, 2.98), (5.54, 3.36), (8.90, 4.10))
+COLUMNS = ((0.40, 1.72), (2.12, 2.14), (4.26, 2.24), (6.50, 2.24), (8.74, 2.40))
 
 
 def _draw_model_table(slide, top: float) -> None:
-    headers = ("Model", "Algorithm", "What it decides", "How it is trained")
+    headers = ("Model", "Algorithm", "What it decides", "How it is trained", "How good it is")
     row = 0.182
 
     for column, (left, width) in enumerate(COLUMNS):
@@ -738,8 +745,9 @@ def _draw_model_table(slide, top: float) -> None:
     clear_text(note)
     add_line(
         note.text_frame,
-        "Bold: learns from data already. The rest run on hand-written rules behind the same interface "
-        "until a semester of use supplies labels. The AI drafts and labels; it never marks a submission.",
+        "Bold: learns from data already, measured on the seeded course. The rest run on hand-written "
+        "rules behind the same interface until a semester of use supplies labels, and state how each "
+        "will be judged. The AI drafts and labels; it never marks a submission.",
         size=9.5, bold=False, colour=HEADING_BLUE, bullet=None, first=True, spacing=1.0,
     )
 

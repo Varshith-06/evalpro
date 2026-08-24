@@ -186,12 +186,41 @@ You are executing untrusted code, written by capable people, on your
 infrastructure, at scale, on a deadline. See **[docs/SECURITY.md](docs/SECURITY.md)**
 for the full thirteen-layer stack and the adversarial catalogue.
 
-The two decisions that matter more than any flag:
+### Two threats, and only one of them is about isolation
 
-1. **Expected outputs live outside the boundary.** `SandboxJob` has no field for
-   an expected output — it is not representable. Comparison happens on the host.
-2. **One-shot instances.** Every job gets a fresh directory, destroyed
-   afterwards, so no submission can contaminate the next.
+**Threat A — escape the machine.** Rare, catastrophic, and what the thirteen
+layers are for: microVM, seccomp allow-list, dropped capabilities, empty netns,
+cgroup ceilings, one-shot instances, worthless worker credentials.
+
+**Threat B — get a better mark.** Vastly more common, and *not one isolation
+flag addresses it*. It is defended by the shape of the system:
+
+| Attack | Why it fails |
+|---|---|
+| Read or hardcode the expected output | The oracle is never inside the boundary. `SandboxJob` has **no field** for an expected output — it is not representable, so this is a type-level guarantee rather than a config someone can set wrong. Comparison happens on the host (`b4_execute`). |
+| Catch everything and print `PASS` | The harness owns the result channel: one JSON document at `EVALPRO_RESULT_PATH`, and nothing else is read. Exit code and output shape are validated by the caller. |
+| Memorise the inputs from a previous run | Property inputs are seeded from `(assignment_id, attempt_id)` (`pipeline.py`) — reproducible for regrading, unguessable to the student. |
+| `sleep()` so a timeout scores as partial | A timeout is an explicit failure with a reason. Never partial credit. |
+| Pad with dead code to beat similarity | Dead-code elimination before comparison, and multi-signal agreement is required. |
+| Prompt-injection in a comment or report | Student text is data, never instruction. Nothing in `b6_report` puts it in an instruction position. |
+
+**One-shot instances** sit across both: every job gets a fresh directory,
+destroyed afterwards, so no submission can contaminate the next.
+
+### What the layer list over-sells
+
+Worth knowing before presenting it:
+
+- **Firecracker does not by itself close speculative-execution side channels.**
+  That needs host microcode plus, per Firecracker's own production guidance,
+  disabling SMT. It matters precisely here, because a cohort's code runs
+  concurrently on shared cores.
+- **The layer-0 static pre-screen is advisory and must stay that way.** Scanning
+  for raw syscalls or `ptrace` is defeated by any obfuscation, so it informs the
+  gate and never blocks on its own.
+- **The metadata-endpoint firewall (169.254.169.254) only applies on cloud
+  hosts** — but there it is the single most common path from "ran attacker
+  code" to "attacker has your cloud credentials".
 
 `GET /api/admin/system-health` returns an **honest capability report**: which of
 the thirteen layers this host actually applies, and which need the production
@@ -308,6 +337,32 @@ future performance is an expensive decoration) and **early-warning bias delta**
 (a risk model that flags one demographic disproportionately is actively
 harmful).
 
+Measured on the seeded demo course, targets from the spec:
+
+| Metric | Now | Target |
+|---|---|---|
+| p95 grading latency | **0.65 s** | < 180 s |
+| Auto-release coverage | **60.4%** | ≥ 70% by semester 2 |
+| Override rate on released work | **5.5%** | < 3% |
+| Mastery predictive validity (AUC) | **0.75** | > 0.75 on the next assignment |
+| False-flag rate, integrity | **0.0%** | < 1% |
+| Appeal rate | **1.1%** | < 5%, trending down |
+| Faculty minutes per assignment | **21.8** | falling semester over semester |
+| Early-warning bias delta | **6.1%** | < 5% — **currently over, so risk flagging is blocked** |
+| QWK vs faculty grades | not computed | > 0.85 (needs a graded holdout) |
+
+Two of those are deliberately unflattering. The override rate is above target
+because the confidence estimator has three corrections to learn from rather
+than three thousand, and the bias delta is over threshold — so the risk model
+is **switched off in the product**, which is the behaviour the audit exists to
+produce rather than a number to tune away.
+
+Per-model accuracy, where there is any: knowledge tracing is the 0.75 above;
+the confidence estimator is judged by that override rate; copy detection has
+raised no false flags across 91 runs. The other five models are not trained
+yet, so they have no accuracy — only a stated way each will be judged. Nothing
+in this table is projected.
+
 ---
 
 ## Layout
@@ -346,7 +401,9 @@ implementation specification this is built from.
   part that protects *grades* rather than the machine — the expected output never
   enters the guest, every job gets a one-shot directory, the wall-clock kill
   comes from a supervisor outside the guest, and the environment is scrubbed to
-  15 variables. Run it on untrusted code only under the Linux backend.
+  15 variables. In the terms above: **Threat B is defended on every host; Threat
+  A is not.** This is a design spec, not a shipped boundary — run it on untrusted
+  code only under the Linux backend.
 - **Auto-release coverage in the demo is about 60%**, not the 70% the spec
   targets for semester 2. That is the honest cold-start number: the demo cohort
   is deliberately full of broken code, and the confidence estimator has three
