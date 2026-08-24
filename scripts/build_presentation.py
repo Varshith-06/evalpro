@@ -277,30 +277,30 @@ def build_solution_slide(slide) -> None:
         (
             "Detailed explanation of the proposed solution",
             [
-                "A student submits their lab program. It is run, marked, and every mark is explained.",
-                "Each mark is tied to a topic, so a student sees which topic is weak - not just which lab.",
-                "Those marks add up across the semester into a picture of what each student understands.",
-                "A student who thinks a mark is wrong can challenge it, and a teacher answers.",
+                "The teacher writes the question in plain English. No answer key and no test cases needed.",
+                "The platform reads how the student solved it and marks the approach, with a reason for every mark.",
+                "A right method with one wrong line still scores. Code that will not even run is still read.",
+                "Every mark is tied to a topic, so a term of marks becomes a picture of what a student understands.",
             ],
         ),
         (
             "How it addresses the problem",
             [
-                "Collects labs, submissions and class lists from the college's existing system.",
-                "Analyses each submission, each student, each question and the whole class.",
+                "Plugs into the college's existing system for labs, submissions and class lists.",
                 "Groups the class's mistakes, so a teacher sees the few things most people got wrong.",
                 "Flags students slipping behind while there is still time to help them.",
+                "A student who thinks a mark is wrong can challenge it, and a teacher answers.",
             ],
         ),
         (
             "Innovation and uniqueness of the solution",
             [
-                "It marks the thinking, not just the output - a right idea with one wrong line still scores.",
+                "Other auto-graders ask “did the output match?”. This one asks “was the idea right?”.",
+                "So a teacher can set an open question and still get it marked - no test cases to write.",
                 "The answer key never touches the student's program, so it cannot be copied.",
                 "It marks the question paper too - unclear questions are flagged to the teacher.",
                 "It spots copied work by showing the matching lines - the teacher decides, not the machine.",
                 "It checks its own fairness: if it marks one group differently, it says so before results go out.",
-                "When it is unsure, it says so and hands the work to a human.",
             ],
         ),
     ]
@@ -336,8 +336,7 @@ def build_technical_slide(slide) -> None:
         bullet="v", bullet_font="Wingdings", before=11, after=6,
     )
     for text in [
-        "The teacher writes the question in plain English; the platform shows what it will check "
-        "before anything is published.",
+        "Before publishing, the teacher sees exactly what will be checked, and can change any of it.",
         "Working prototype: a class of 24 students across four labs, marked end to end.",
     ]:
         add_line(frame, text, size=13.5, bullet="•", indent=0.12, spacing=1.06, after=4)
@@ -545,7 +544,7 @@ def _render_sections(
 # ==========================================================================
 LAYERS = [
     ("1.  COLLECT", "lab questions, submissions\nand class lists, from the\ncollege's existing system"),
-    ("2.  MARK", "run the program safely,\ncheck it against the rubric,\nexplain every mark"),
+    ("2.  MARK", "read how it was solved,\nrun it safely, judge the approach,\nexplain every mark"),
     ("3.  UNDERSTAND", "build a picture of which\ntopics each student\nhas actually got"),
     ("4.  ACT", "tell students what to revise,\ntell teachers what to reteach,\nreport on the course"),
 ]
