@@ -3,6 +3,34 @@
 import { api, esc, num, pct, toast } from "../util.js";
 import { setCrumbs } from "../app.js";
 
+// The deadline view. Depth is the number waiting to be marked right now, which
+// is the one number that moves when a class submits at once - and the one an
+// administrator asks about when students say "it is stuck".
+function queueTiles(q) {
+  if (!q) return "";
+  const busy = q.depth > 0;
+  return `
+    <div class="card pad0" style="margin-bottom:14px">
+      <header><h2>Marking queue</h2></header>
+      <div style="padding:12px 14px 4px"><div class="tiles">
+      <div class="tile ${busy ? "warn" : "good"}">
+        <div class="k">Waiting to be marked</div><div class="v">${q.depth}</div>
+        <div class="n">${busy ? `longest wait ${(q.oldest_wait_ms / 1000).toFixed(0)}s` : "nothing queued"}</div></div>
+      <div class="tile"><div class="k">Marking now</div>
+        <div class="v">${q.running} <span class="faint" style="font-size:15px">/ ${q.workers}</span></div>
+        <div class="n">at most ${q.max_per_assignment} per lab</div></div>
+      <div class="tile"><div class="k">Typical wait</div>
+        <div class="v">${(q.mean_wait_ms / 1000).toFixed(1)}s</div>
+        <div class="n">before marking starts</div></div>
+      <div class="tile ${q.failed ? "bad" : "good"}">
+        <div class="k">Marked / failed</div>
+        <div class="v" style="font-size:19px;padding-top:4px">${q.completed} / ${q.failed}</div>
+        <div class="n">busiest backlog ${q.peak_depth}</div></div>
+      </div></div>
+    </div>`;
+}
+
+
 export async function render(root, ctx) {
   setCrumbs([{ label: "System" }]);
   const [health, metrics, audit] = await Promise.all([
@@ -29,6 +57,8 @@ export async function render(root, ctx) {
         <div class="v" style="font-size:17px;padding-top:6px">${audit.passed ? "Passed" : "Failed"}</div>
         <div class="n">largest gap ${pct(audit.max_flag_rate_delta, 1)}</div></div>
     </div>
+
+    ${queueTiles(health.grading_queue)}
 
     ${
       audit.deployment_blocked

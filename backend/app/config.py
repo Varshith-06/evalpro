@@ -125,11 +125,31 @@ class AnalyticsConfig:
 
 
 @dataclass(frozen=True)
+class QueueConfig:
+    """§5.4 the grading queue.
+
+    ``workers`` is the ceiling on concurrent sandboxed runs. It is deliberately
+    small: grading is CPU-bound, and oversubscribing the box makes every run
+    slower rather than getting more of them done. ``max_per_assignment`` is what
+    stops one flooded lab owning every worker.
+    """
+
+    workers: int = 4
+    max_per_assignment: int = 3
+    # Depth is a very high ceiling, not a throttle: at a deadline the right
+    # answer to "we are busy" is a longer wait, never a refusal.
+    max_depth: int = 10_000
+    history: int = 2_000
+    wait_timeout_s: float = 120.0
+
+
+@dataclass(frozen=True)
 class Settings:
     ingest: IngestLimits = field(default_factory=IngestLimits)
     sandbox: SandboxLimits = field(default_factory=SandboxLimits)
     gate: GateConfig = field(default_factory=GateConfig)
     analytics: AnalyticsConfig = field(default_factory=AnalyticsConfig)
+    queue: QueueConfig = field(default_factory=QueueConfig)
     demo_mode: bool = os.environ.get("EVALPRO_DEMO", "1") == "1"
 
 

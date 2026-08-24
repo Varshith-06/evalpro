@@ -50,7 +50,17 @@ async def lifespan(app: FastAPI):
                         logger.info("  marking %s...", code)
 
                 logger.info("Demo data: %s", seed_all(session, progress=progress))
-    yield
+
+    from .services.queue_service import get_queue, shutdown_queue
+
+    get_queue()
+    try:
+        yield
+    finally:
+        # Drain rather than drop: a submission that was accepted has been
+        # promised to a student, and losing it on shutdown is worse than
+        # waiting a few seconds for it.
+        shutdown_queue(drain=True)
 
 
 app = FastAPI(

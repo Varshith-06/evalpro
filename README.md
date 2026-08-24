@@ -110,6 +110,44 @@ evidence; **none writes a score directly**.
 | **B6** Report cross-check | Does the report describe *this* code? Does it cover the rubric? | `engine/b6_report.py` |
 | **B7** Aggregate and gate | Reliability-weighted score, confidence, routing table | `engine/b7_gate.py` |
 
+### The deadline
+
+Everyone submits in the last hour. `/api/submit` therefore does **not** grade:
+it validates, records the attempt, hands the work to `services/queue_service.py`
+and returns. A caller can wait for its own job (the default, so scripts and the
+UI see a marked result) or pass `wait: false`, take a ticket, and poll
+`/api/jobs/{id}`.
+
+The queue is a bounded pool with a **per-assignment ceiling**, which is the part
+a plain `ThreadPoolExecutor` will not give you: that is FIFO across everything,
+so the first lab to flood the queue owns every worker until it drains. Post-
+deadline marking outranks a pre-deadline practice run. Overload is reported as
+a longer wait, never a refusal — a student who submitted before the deadline
+submitted before the deadline.
+
+Measured here, 60 students submitting simultaneously:
+
+| | Before | After |
+| --- | --- | --- |
+| Time to accept all 60 | — (blocked in-request) | **0.10 s**, p95 81 ms |
+| Submissions lost | 5 of 60 | **0** |
+| All 60 marked | — | 62.8 s |
+
+Those 5 losses were real and worth naming: SQLite takes its single writer lock
+on the first flush and holds it until commit, so accepting and grading in one
+transaction meant one worker owning that lock for a whole cascade while the
+others timed out against it. Accepting and grading are now separate
+transactions, and on SQLite the writer is serialised explicitly rather than
+left to a timeout. That is honest about the real ceiling: **concurrent grading
+needs a database with concurrent writers.** The queue interface is the seam
+where a Postgres `SELECT … FOR UPDATE SKIP LOCKED` backend drops in, which also
+survives a worker being killed mid-job.
+
+Not Kafka. A department-wide deadline is a few thousand submissions over ten
+minutes — around three a second — and Kafka is a distributed *log* built for a
+thousand times that, with no per-job ack, no visibility timeout, no retry and
+no priority.
+
 ### The three things that make students trust it
 
 **Repair distance.** On build failure, search for the minimum token-level edit
@@ -281,7 +319,7 @@ backend/app/
   engine/                Layer 1: the cascade B0–B7, and the sandbox
   analytics/             Layer 2 and 3: BKT, item analysis, clustering,
                          remediation, risk, attainment, confidence estimation
-  services/              authoring, grading, analytics, metrics
+  services/              authoring, grading, queue, analytics, metrics
   api/                   core + one router per role
   harness/runner.py      runs INSIDE the sandbox; owns the result channel
   seed.py, seed_data.py  the demo course, run through the real pipeline
@@ -321,6 +359,11 @@ implementation specification this is built from.
 - **Python is the only fully supported language today.** The code graph is
   deliberately language-agnostic so a tree-sitter backend drops in behind
   `build_code_graph` without touching anything downstream.
+- **Concurrent grading is capped by SQLite, not by the queue.** The queue runs
+  four workers, but SQLite allows one writer, so on this backend the grading
+  transactions are serialised deliberately rather than left to collide. Real
+  parallel marking needs the Postgres backend; the queue interface does not
+  change when it arrives.
 - **The demo has no authentication.** Identity comes from the LTI launch in a
   real deployment; the demo picks a user from the roster via the VIEW AS switch.
 - **The rubric editor sets a check's kind and target, not its parameters.**

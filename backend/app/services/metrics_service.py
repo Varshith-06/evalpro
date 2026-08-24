@@ -409,9 +409,12 @@ def system_health(session: Session) -> dict:
     )
     p95 = durations[int(len(durations) * 0.95)] if durations else 0
 
+    from .queue_service import get_queue
+
     return {
         "total_runs": total_runs,
         "review_queue_depth": escalated,
+        "grading_queue": get_queue().stats(),
         "p95_latency_ms": p95,
         "median_latency_ms": durations[len(durations) // 2] if durations else 0,
         "observations": session.scalar(select(func.count(ConceptObservation.id))) or 0,

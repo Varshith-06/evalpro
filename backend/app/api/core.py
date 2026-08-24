@@ -6,10 +6,12 @@ routers, each answering exactly one question.
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..config import settings
 from ..db import get_session
 from ..engine.b0_ingest import IngestError, ingest_archive, ingest_files
 from ..engine.sandbox import describe_isolation
@@ -44,6 +46,14 @@ class SubmitRequest(BaseModel):
     force_full_run: bool = Field(
         False,
         description="Run the hidden test set too. Faculty-only; ignored for pre-deadline student feedback.",
+    )
+    wait: bool = Field(
+        True,
+        description=(
+            "Wait for the grading queue to finish and return the marked result. "
+            "Set false at a deadline to get a job ticket back immediately and poll "
+            "/api/jobs/{job_id}."
+        ),
     )
 
 
@@ -310,29 +320,109 @@ def approve(version_id: str, payload: ApproveRequest, session: Session = Depends
 # --------------------------------------------------------------------------
 # Submission and evidence
 # --------------------------------------------------------------------------
+def _raise_for_job(job) -> None:
+    """Map a failure that happened on a queue worker onto its HTTP status."""
+    exc = job.exception
+    if isinstance(exc, grading_service.SubmissionRejected):
+        raise HTTPException(429 if "Rate limit" in str(exc) else 409, str(exc)) from exc
+    if isinstance(exc, IngestError):
+        raise HTTPException(400, f"Ingest rejected the bundle: {exc}") from exc
+    raise HTTPException(500, job.error or "Grading failed.")
+
+
+def _ticket(job, queue) -> dict:
+    """What a caller gets when the work is still in flight."""
+    stats = queue.stats()
+    ahead = queue.position(job.id)
+    return {
+        **job.as_dict(),
+        "position": ahead,
+        "queue_depth": stats["depth"],
+        "running": stats["running"],
+        "workers": stats["workers"],
+    }
+
+
 @router.post("/submit")
 def submit(payload: SubmitRequest, session: Session = Depends(get_session)) -> dict:
+    """Accept a submission. Grading happens on the queue, never in this request.
+
+    By default the request waits for its own job so callers see the marked
+    result exactly as before. At a deadline a client should pass
+    ``wait: false``, take the ticket, and poll - which is the difference between
+    a slow page and a browser timeout.
+    """
+    from ..services import queue_service
+
+    queue = queue_service.get_queue()
     try:
-        attempt, run, from_cache = grading_service.submit(
-            session,
+        job = grading_service.submit_queued(
             payload.assignment_id,
             payload.student_id,
             payload.files,
             payload.report_text,
             visible_only=False if payload.force_full_run else None,
+            label=f"student {payload.student_id[:8]}",
         )
-    except grading_service.SubmissionRejected as exc:
-        raise HTTPException(429 if "Rate limit" in str(exc) else 409, str(exc)) from exc
-    except IngestError as exc:
-        raise HTTPException(400, f"Ingest rejected the bundle: {exc}") from exc
-    session.commit()
+    except queue_service.QueueFull as exc:
+        raise HTTPException(503, str(exc)) from exc
+
+    if not payload.wait:
+        return JSONResponse(status_code=202, content=_ticket(job, queue))
+
+    if not job.wait(timeout=settings.queue.wait_timeout_s):
+        # Still running. Hand back the ticket rather than holding the socket
+        # open indefinitely; the work is not lost and the client can poll.
+        return JSONResponse(status_code=202, content=_ticket(job, queue))
+
+    if job.state == queue_service.FAILED:
+        _raise_for_job(job)
+
+    result = dict(job.result)                      # type: ignore[arg-type]
+    # The worker committed on its own session; start a fresh transaction here so
+    # this one is not reading a snapshot from before that commit.
+    session.rollback()
     return {
-        "attempt_id": attempt.id,
-        "run_id": run.id,
-        "from_cache": from_cache,
-        "visible_only": run.visible_only,
-        "detail": grading_service.run_detail(session, run.id),
+        **result,
+        "job_id": job.id,
+        "queued_ms": job.waited_ms,
+        "graded_ms": job.ran_ms,
+        "detail": grading_service.run_detail(session, result["run_id"]),
     }
+
+
+@router.get("/jobs/{job_id}")
+def job_status(job_id: str, session: Session = Depends(get_session)) -> dict:
+    """Poll a submission that was accepted with ``wait: false``."""
+    from ..services import queue_service
+
+    queue = queue_service.get_queue()
+    job = queue.get(job_id)
+    if job is None:
+        raise HTTPException(404, "No such job. Tickets are kept for the recent past only.")
+    if job.state == queue_service.FAILED:
+        _raise_for_job(job)
+    if job.state != queue_service.DONE:
+        return _ticket(job, queue)
+
+    result = dict(job.result)                      # type: ignore[arg-type]
+    session.rollback()
+    return {
+        **result,
+        "job_id": job.id,
+        "state": job.state,
+        "queued_ms": job.waited_ms,
+        "graded_ms": job.ran_ms,
+        "detail": grading_service.run_detail(session, result["run_id"]),
+    }
+
+
+@router.get("/queue")
+def queue_stats() -> dict:
+    """What the grading queue is doing right now."""
+    from ..services import queue_service
+
+    return queue_service.get_queue().stats()
 
 
 @router.post("/submit/upload")

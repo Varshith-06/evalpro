@@ -12,6 +12,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..config import settings
+from ..db import grading_write_lock, session_scope
 from ..engine.b0_ingest import compute_content_hash, rate_limit_exceeded
 from ..engine.pipeline import EvaluationPipeline, build_cohort_corpus
 from ..models import (
@@ -49,15 +50,35 @@ def audit(session: Session, kind: str, actor_id: str | None, subject_id: str | N
 # --------------------------------------------------------------------------
 # Submission
 # --------------------------------------------------------------------------
-def submit(
+def resolve_visibility(assignment: Assignment, visible_only: bool | None) -> bool:
+    """Default to "before the deadline", explicit wins.
+
+    Shared so that accepting and grading, which now happen in two separate
+    transactions, cannot come to different conclusions about whether the
+    hidden test set may run.
+    """
+    if visible_only is not None:
+        return visible_only
+    due = assignment.due_at
+    return bool(due and _now().replace(tzinfo=None) < due)
+
+
+def accept(
     session: Session,
     assignment_id: str,
     student_id: str,
     files: dict[str, str],
     report_text: str = "",
     visible_only: bool | None = None,
-) -> tuple[SubmissionAttempt, EvaluationRun, bool]:
-    """Accept an attempt and evaluate it. Returns ``(attempt, run, from_cache)``.
+) -> tuple[SubmissionAttempt, EvaluationRun | None, bool]:
+    """Validate and record an attempt, without grading it.
+
+    Split from grading so the two can be committed separately. That matters
+    under deadline load: SQLite takes its single writer lock on the first
+    flush and holds it until commit, so accepting and grading in one
+    transaction means one worker owns the write lock for the whole cascade and
+    every other worker eventually times out against it. Accept, commit, then
+    grade in a second short transaction.
 
     ``visible_only`` defaults to "before the deadline", which is what makes
     pre-deadline feedback safe: the hidden test set is never executed for a run
@@ -111,9 +132,7 @@ def submit(
         audit(session, "submission.cache_hit", student_id, cached.id, content_hash=content_hash)
         return session.get(SubmissionAttempt, cached.attempt_id), cached, True
 
-    if visible_only is None:
-        due = assignment.due_at
-        visible_only = bool(due and _now().replace(tzinfo=None) < due)
+    visible_only = resolve_visibility(assignment, visible_only)
 
     late_seconds = 0
     if assignment.due_at:
@@ -132,18 +151,52 @@ def submit(
     )
     session.add(attempt)
     session.flush()
+    return attempt, None, False
 
+
+def grade_attempt(
+    session: Session,
+    attempt: SubmissionAttempt,
+    visible_only: bool,
+) -> EvaluationRun:
+    """Grade an attempt that has already been accepted and committed."""
+    submission = attempt.submission
+    assignment = session.get(Assignment, submission.assignment_id)
+    version = assignment.active_version
     run = evaluate(session, attempt, version, visible_only=visible_only)
     audit(
         session,
         "submission.evaluated",
-        student_id,
+        submission.student_id,
         run.id,
         assignment=assignment.code,
         visible_only=visible_only,
-        content_hash=content_hash,
+        content_hash=attempt.content_hash,
     )
-    return attempt, run, False
+    return run
+
+
+def submit(
+    session: Session,
+    assignment_id: str,
+    student_id: str,
+    files: dict[str, str],
+    report_text: str = "",
+    visible_only: bool | None = None,
+) -> tuple[SubmissionAttempt, EvaluationRun, bool]:
+    """Accept an attempt and grade it in one transaction.
+
+    The direct path, kept for the seeder, scripts and any caller that wants the
+    result in hand. The API uses the queue instead; see ``submit_queued``.
+    """
+    attempt, cached, from_cache = accept(
+        session, assignment_id, student_id, files, report_text, visible_only=visible_only
+    )
+    if from_cache:
+        return attempt, cached, True
+    assignment = session.get(Assignment, assignment_id)
+    resolved = resolve_visibility(assignment, visible_only)
+    return attempt, grade_attempt(session, attempt, resolved), False
 
 
 def evaluate(
@@ -530,3 +583,66 @@ def gradebook_rows(session: Session, course_id: str) -> list[dict]:
         output.append(row)
     output.sort(key=lambda r: (r["assignment_code"], r["student_id"]))
     return output
+
+
+# --------------------------------------------------------------------------
+# Queued submission (§5.4)
+# --------------------------------------------------------------------------
+def submit_queued(
+    assignment_id: str,
+    student_id: str,
+    files: dict[str, str],
+    report_text: str = "",
+    visible_only: bool | None = None,
+    priority: int | None = None,
+    label: str = "",
+):
+    """Hand a submission to the grading queue and return its ticket.
+
+    The work runs on a queue worker with its own session, so nothing about the
+    caller's transaction leaks into grading and grading cannot hold an HTTP
+    worker open for the length of a sandboxed run. The result is a plain dict
+    of ids rather than ORM objects: those belong to the worker's session and
+    would be detached by the time anyone else looked at them.
+    """
+    from . import queue_service
+
+    if priority is None:
+        priority = (
+            queue_service.PRIORITY_PREVIEW if visible_only else queue_service.PRIORITY_GRADE
+        )
+
+    def run_job() -> dict:
+        # Two transactions on purpose. SQLite takes its single writer lock on
+        # the first flush and holds it to commit, so accepting and grading
+        # together would mean one worker owning that lock for the whole
+        # cascade while the others time out behind it.
+        with grading_write_lock(), session_scope() as session:
+            attempt, cached, from_cache = accept(
+                session, assignment_id, student_id, files, report_text,
+                visible_only=visible_only,
+            )
+            if from_cache:
+                return {
+                    "attempt_id": attempt.id,
+                    "run_id": cached.id,
+                    "from_cache": True,
+                    "visible_only": cached.visible_only,
+                }
+            assignment = session.get(Assignment, assignment_id)
+            resolved = resolve_visibility(assignment, visible_only)
+            attempt_id = attempt.id
+
+        with grading_write_lock(), session_scope() as session:
+            attempt = session.get(SubmissionAttempt, attempt_id)
+            run = grade_attempt(session, attempt, resolved)
+            return {
+                "attempt_id": attempt_id,
+                "run_id": run.id,
+                "from_cache": False,
+                "visible_only": run.visible_only,
+            }
+
+    return queue_service.get_queue().submit(
+        run_job, key=assignment_id, priority=priority, label=label,
+    )
