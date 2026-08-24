@@ -97,13 +97,20 @@ def set_line_spacing(paragraph, spacing: float, before: float = 0.0, after: floa
     pct = ln.makeelement(qn("a:spcPct"), {"val": str(int(spacing * 100000))})
     ln.append(pct)
     p_pr.insert(0, ln)
+    # CT_TextParagraphProperties fixes the order of its children: lnSpc, spcBef,
+    # spcAft, then the bullet elements. set_bullet runs before this and appends
+    # buFont/buChar, so appending here would put spcAft *after* them - and
+    # PowerPoint silently honours out-of-order spacing only in part. Insert at
+    # the front instead, right behind lnSpc, so the order is always valid.
+    position = 1
     for tag, value in (("a:spcBef", before), ("a:spcAft", after)):
         if value <= 0:
             continue
         node = p_pr.makeelement(qn(tag), {})
         pts = node.makeelement(qn("a:spcPts"), {"val": str(int(value * 100))})
         node.append(pts)
-        p_pr.append(node)
+        p_pr.insert(position, node)
+        position += 1
 
 
 def style_run(run, size: float, bold: bool = False, colour: RGBColor = BODY_BLACK,
@@ -200,14 +207,11 @@ def delete_slide(prs, index: int) -> None:
 # Slide content
 # ==========================================================================
 TEAM = {
-    # Fields the portal issues. Left as obvious placeholders to be filled in
-    # before upload rather than invented here.
-    "ps_id": "[Problem Statement ID from the SIH portal]",
+    "ps_id": "16",
     "ps_title": "Automated Programming Lab Evaluation Platform",
     "theme": "Smart Education",
     "category": "Software",
-    "team_id": "[Team ID from the SIH portal]",
-    "team_name": "[Team Name as registered on the portal]",
+    "team_name": "Nullcheck",
 }
 
 IDEA_TITLE = "EvalPro - Programming Labs That Mark Themselves"
@@ -216,7 +220,7 @@ IDEA_TITLE = "EvalPro - Programming Labs That Mark Themselves"
 def build_title_slide(slide) -> None:
     box = find(slide, "TextBox 9")
     set_autofit_off(box)
-    place(box, 0.36, 2.10, 6.20, 5.05)
+    place(box, 0.40, 2.06, 7.20, 5.05)
     clear_text(box)
     frame = box.text_frame
 
@@ -225,8 +229,7 @@ def build_title_slide(slide) -> None:
         ("Problem Statement Title – ", TEAM["ps_title"]),
         ("Theme – ", TEAM["theme"]),
         ("PS Category – ", TEAM["category"]),
-        ("Team ID – ", TEAM["team_id"]),
-        ("Team Name (Registered on portal) – ", TEAM["team_name"]),
+        ("Team Name – ", TEAM["team_name"]),
     ]
     for index, (label, value) in enumerate(fields):
         paragraph = frame.paragraphs[0] if index == 0 else frame.add_paragraph()
@@ -235,10 +238,10 @@ def build_title_slide(slide) -> None:
         paragraph.alignment = PP_ALIGN.LEFT
         label_run = paragraph.add_run()
         label_run.text = label
-        style_run(label_run, 15.5, bold=True, colour=BODY_BLACK)
+        style_run(label_run, 13.5, bold=True, colour=BODY_BLACK)
         value_run = paragraph.add_run()
         value_run.text = value
-        style_run(value_run, 15.5, bold=False, colour=HEADING_BLUE)
+        style_run(value_run, 13.5, bold=False, colour=HEADING_BLUE)
         set_bullet(paragraph, "•")
         set_line_spacing(paragraph, 1.12, before=0, after=14)
 
@@ -257,9 +260,9 @@ def build_solution_slide(slide) -> None:
         title.text_frame, IDEA_TITLE, size=24, bold=True, colour=HEADING_BLUE,
         font=TIMES, first=True, align=PP_ALIGN.LEFT,
     )
-    # The template's team-name oval sits at x 0.36-1.73, so the title starts
-    # clear of it rather than running underneath.
-    place(title, 1.88, 0.22, 8.72, 0.80)
+    # The team-name oval that used to occupy this corner is stripped, so the
+    # title starts at the same left margin as every body bullet under it.
+    place(title, 0.40, 0.24, 10.40, 0.78)
 
     box = find(slide, "TextBox 8")
     set_autofit_off(box)
@@ -270,8 +273,8 @@ def build_solution_slide(slide) -> None:
     add_line(
         frame,
         "Proposed Solution (Describe your Idea/Solution/Prototype)",
-        size=20, bold=True, colour=HEADING_BLUE, underline=True,
-        bullet="v", bullet_font="Wingdings", first=True, after=11,
+        size=18, bold=True, colour=HEADING_BLUE, underline=True,
+        bullet="v", bullet_font="Wingdings", first=True, after=4,
     )
 
     sections = [
@@ -305,8 +308,8 @@ def build_solution_slide(slide) -> None:
             ],
         ),
     ]
-    _render_sections(frame, sections, heading_size=18, body_size=16,
-                     section_gap=20, bullet_gap=6, line=1.12)
+    _render_sections(frame, sections, heading_size=16, body_size=14,
+                     section_gap=5, bullet_gap=1, line=1.06)
 
 
 def build_technical_slide(slide) -> None:
@@ -354,9 +357,10 @@ def build_technical_slide(slide) -> None:
 def build_feasibility_slide(slide) -> None:
     box = find(slide, "TextBox 8")
     set_autofit_off(box)
-    place(box, 0.36, 1.26, 6.70, 4.60)
+    place(box, 0.36, 1.20, 6.70, 4.60)
     clear_text(box)
     frame = box.text_frame
+    frame.vertical_anchor = MSO_ANCHOR.TOP
 
     sections = [
         (
@@ -390,8 +394,8 @@ def build_feasibility_slide(slide) -> None:
             ],
         ),
     ]
-    _render_sections(frame, sections, heading_size=14, body_size=11.5,
-                     section_gap=11, bullet_gap=2, line=1.04)
+    _render_sections(frame, sections, heading_size=13.5, body_size=11,
+                     section_gap=5, bullet_gap=0, line=1.04)
 
     _draw_sandbox_panel(slide)
 
@@ -426,7 +430,7 @@ SANDBOX_STACK = [
 
 def _draw_sandbox_panel(slide) -> None:
     left, top, width = 7.32, 1.26, 5.62
-    height = 0.40 + 0.482 * len(SANDBOX_STACK)
+    height = 0.42 + 0.645 * len(SANDBOX_STACK)
 
     back = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(left), Inches(top),
                                   Inches(width), Inches(height))
@@ -453,15 +457,19 @@ def _draw_sandbox_panel(slide) -> None:
         add_line(frame, title, size=11, bold=True, colour=ACCENT_BLUE,
                  bullet="•", indent=0.10, spacing=1.0, after=0)
         add_line(frame, detail, size=9.5, colour=BODY_BLACK, bullet=None,
-                 indent=0.24, spacing=1.02, after=4)
+                 indent=0.24, spacing=1.04, after=8)
 
 
 def build_impact_slide(slide) -> None:
     box = find(slide, "TextBox 8")
     set_autofit_off(box)
-    place(box, 0.36, 1.52, 12.58, 5.24)
+    place(box, 0.36, 1.44, 12.58, 2.84)
     clear_text(box)
     frame = box.text_frame
+    # The template box anchors its text vertically centred, which floats the
+    # block down into the band below as the copy shortens. Pin it to the top so
+    # the gap under it is whatever the geometry says it is.
+    frame.vertical_anchor = MSO_ANCHOR.TOP
 
     sections = [
         (
@@ -484,8 +492,8 @@ def build_impact_slide(slide) -> None:
             ],
         ),
     ]
-    _render_sections(frame, sections, heading_size=17, body_size=14.5,
-                     section_gap=17, bullet_gap=5, line=1.12)
+    _render_sections(frame, sections, heading_size=15, body_size=13.5,
+                     section_gap=6, bullet_gap=1, line=1.06)
 
     _draw_product_band(slide)
 
@@ -519,7 +527,7 @@ PRODUCT_BAND = [
 
 
 def _draw_product_band(slide) -> None:
-    top, height = 4.34, 2.10
+    top, height = 4.44, 2.02
     left, width, gap = 0.36, 4.06, 0.20
 
     for index, (heading, lines) in enumerate(PRODUCT_BAND):
@@ -675,56 +683,63 @@ def _render_sections(
 # blur that, since every unlearned slot has a deterministic stand-in behind the
 # same interface.
 MODELS = [
-    ("Confidence estimator", "which marks are safe to release without a teacher",
+    ("Confidence estimator", "Gradient boosting, tabular",
+     "which marks are safe to release without a teacher",
      "every mark a teacher corrects, forever", True),
-    ("Knowledge tracing", "what each student knows, topic by topic",
+    ("Knowledge tracing", "Bayesian knowledge tracing, EM-fitted",
+     "what each student knows, topic by topic",
      "the stream of marks itself - no labelling", True),
-    ("Misconception clustering", "the few mistakes the whole class is making",
+    ("Misconception clustering", "HDBSCAN over error signatures",
+     "the few mistakes the whole class is making",
      "unsupervised - works from day one", True),
-    ("Copy detector", "copies that renaming and reordering hide",
+    ("Copy detector", "Winnowing (MOSS) + graph embeddings",
+     "copies that renaming and reordering hide",
      "self-supervised: copies made by renaming", False),
-    ("Algorithm identifier", "which method the student actually used",
+    ("Algorithm identifier", "Graph neural net over the CFG",
+     "which method the student actually used",
      "reference solutions and teacher tags", False),
-    ("Report checker", "whether the write-up matches the code",
+    ("Report checker", "DeBERTa-v3 encoder, 3-way entailment",
+     "whether the write-up matches the code",
      "AI drafts labels, teachers correct, then distil", False),
-    ("Early warning", "who is slipping behind, and why",
+    ("Early warning", "Gradient boosting, calibrated",
+     "who is slipping behind, and why",
      "past outcomes, bias-audited before release", False),
-    ("Language detector", "what it is written in and how to run it",
+    ("Language detector", "Gradient boosting on lexical features",
+     "what it is written in and how to run it",
      "auto-labelled from any code corpus", False),
 ]
 
-COLUMNS = ((0.50, 2.40), (2.90, 3.60), (6.60, 5.30))
+COLUMNS = ((0.40, 2.16), (2.56, 2.98), (5.54, 3.36), (8.90, 4.10))
 
 
 def _draw_model_table(slide, top: float) -> None:
-    headers = ("Model", "What it decides", "How it is trained")
+    headers = ("Model", "Algorithm", "What it decides", "How it is trained")
     row = 0.182
 
-    for (left, width), header in zip(COLUMNS, headers):
+    for column, (left, width) in enumerate(COLUMNS):
         box = slide.shapes.add_textbox(Inches(left), Inches(top), Inches(width),
                                        Inches(row * (len(MODELS) + 1) + 0.10))
         set_autofit_off(box)
         clear_text(box)
         frame = box.text_frame
         frame.word_wrap = True
-        add_line(frame, header, size=10, bold=True, colour=ACCENT_BLUE,
+        add_line(frame, headers[column], size=10, bold=True, colour=ACCENT_BLUE,
                  bullet=None, first=True, spacing=1.0, after=3)
-        for index, entry in enumerate(MODELS):
-            live = entry[3]
-            add_line(frame, entry[headers.index(header)], size=9.5,
-                     bold=live and header == "Model",
+        for entry in MODELS:
+            live = entry[-1]
+            add_line(frame, entry[column], size=9.5,
+                     bold=live and column == 0,
                      colour=BODY_BLACK if live else MUTED,
                      bullet=None, spacing=1.0, after=1.5)
 
-    note = slide.shapes.add_textbox(Inches(0.50), Inches(top + row * (len(MODELS) + 1) + 0.12),
+    note = slide.shapes.add_textbox(Inches(0.40), Inches(top + row * (len(MODELS) + 1) + 0.12),
                                     Inches(12.10), Inches(0.24))
     set_autofit_off(note)
     clear_text(note)
     add_line(
         note.text_frame,
-        "Bold: learns from data already. The rest run on hand-written rules until a semester of use "
-        "supplies labels - same interface either way, so swapping a model in changes one file. "
-        "The AI drafts and labels; it never marks a submission.",
+        "Bold: learns from data already. The rest run on hand-written rules behind the same interface "
+        "until a semester of use supplies labels. The AI drafts and labels; it never marks a submission.",
         size=9.5, bold=False, colour=HEADING_BLUE, bullet=None, first=True, spacing=1.0,
     )
 
@@ -784,8 +799,8 @@ def _draw_architecture(slide) -> None:
     clear_text(caption)
     add_line(
         caption.text_frame,
-        "Every mark is tied to a topic, and topics are linked into a prerequisite map - drafted from the "
-        "syllabus, approved by the teacher. The system walks it to find the root gap, not the symptom.",
+        "Every mark is tied to a topic; topics link into a prerequisite map the system walks to "
+        "find the root gap, not the symptom.",
         size=11.5, bold=True, colour=HEADING_BLUE, bullet=None, first=True,
         align=PP_ALIGN.CENTER, spacing=1.04,
     )
@@ -815,23 +830,32 @@ def main() -> int:
     # including the title page, and that this slide may be deleted before upload.
     delete_slide(prs, 6)
 
-    _set_team_name(prs)
+    strip_template_chrome(prs)
     prs.save(str(OUTPUT))
 
     print(f"wrote {OUTPUT.relative_to(REPO)} — {len(prs.slides.__iter__.__self__._sldIdLst)} slides")
     return 0
 
 
-def _set_team_name(prs) -> None:
-    """The oval in the top-left of every content slide reads 'Your Team Name'."""
+def strip_template_chrome(prs) -> None:
+    """Remove the template's two pieces of filler furniture.
+
+    The top-left oval is a placeholder for a team name and the footer reads
+    "@SIH Idea submission- Template". Neither carries information once the
+    title page states who this is, and the oval in particular eats the top-left
+    corner of every slide, which is where a reader's eye starts. The footer bar
+    and the slide number stay -- those are navigation, not filler.
+    """
+    removed = 0
     for slide in prs.slides:
-        for shape in slide.shapes:
-            if not shape.has_text_frame:
-                continue
-            for paragraph in shape.text_frame.paragraphs:
-                for run in paragraph.runs:
-                    if run.text.strip() == "Your Team Name":
-                        run.text = TEAM["team_name"] if not TEAM["team_name"].startswith("[") else "Your Team Name"
+        for shape in list(slide.shapes):
+            text = shape.text_frame.text.strip() if shape.has_text_frame else ""
+            is_oval = text == "Your Team Name"
+            is_footer = "SIH Idea submission" in text
+            if is_oval or is_footer:
+                shape._element.getparent().remove(shape._element)
+                removed += 1
+    return removed
 
 
 if __name__ == "__main__":
