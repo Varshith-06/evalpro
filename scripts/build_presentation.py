@@ -280,6 +280,7 @@ def build_solution_slide(slide) -> None:
                 "A student submits their lab program. It is run, marked, and every mark is explained.",
                 "Each mark is tied to a topic, so a student sees which topic is weak - not just which lab.",
                 "Those marks add up across the semester into a picture of what each student understands.",
+                "A student who thinks a mark is wrong can challenge it, and a teacher answers.",
             ],
         ),
         (
@@ -287,7 +288,8 @@ def build_solution_slide(slide) -> None:
             [
                 "Collects labs, submissions and class lists from the college's existing system.",
                 "Analyses each submission, each student, each question and the whole class.",
-                "Tells students what to revise, and teachers what to explain again.",
+                "Groups the class's mistakes, so a teacher sees the few things most people got wrong.",
+                "Flags students slipping behind while there is still time to help them.",
             ],
         ),
         (
@@ -296,6 +298,8 @@ def build_solution_slide(slide) -> None:
                 "It marks the thinking, not just the output - a right idea with one wrong line still scores.",
                 "The answer key never touches the student's program, so it cannot be copied.",
                 "It marks the question paper too - unclear questions are flagged to the teacher.",
+                "It spots copied work by showing the matching lines - the teacher decides, not the machine.",
+                "It checks its own fairness: if it marks one group differently, it says so before results go out.",
                 "When it is unsure, it says so and hands the work to a human.",
             ],
         ),
