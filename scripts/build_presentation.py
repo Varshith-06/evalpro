@@ -354,7 +354,7 @@ def build_technical_slide(slide) -> None:
 def build_feasibility_slide(slide) -> None:
     box = find(slide, "TextBox 8")
     set_autofit_off(box)
-    place(box, 0.36, 1.30, 12.58, 4.60)
+    place(box, 0.36, 1.26, 6.70, 4.60)
     clear_text(box)
     frame = box.text_frame
 
@@ -364,7 +364,7 @@ def build_feasibility_slide(slide) -> None:
             [
                 "It already works. Nothing here waits on a research breakthrough.",
                 "Runs on a normal laptop or a small college server.",
-                "Fits the tools a college already uses, so marks return to the existing gradebook.",
+                "Fits the tools a college already uses, so marks go back to the gradebook.",
             ],
         ),
         (
@@ -373,6 +373,8 @@ def build_feasibility_slide(slide) -> None:
                 "Running students' programs safely on our own machine.",
                 "A wrong automatic mark loses a class's trust very quickly.",
                 "Wrongly accusing a student of copying.",
+                "Student data is protected by law, here and abroad.",
+                "Everyone submits in the last hour before the deadline.",
                 "Teachers abandoning anything that costs more time than it saves.",
             ],
         ),
@@ -382,18 +384,76 @@ def build_feasibility_slide(slide) -> None:
                 "Every program runs sealed off from everything else, then is destroyed.",
                 "Unsure work goes to the teacher, and any student can question any mark.",
                 "For copying we show the matching lines only. The teacher decides.",
+                "Role-scoped access, and a student can see what is inferred about them.",
+                "A queue that adds workers on demand, with a ceiling per lab.",
                 "Ten-minute setup, and every correction a teacher makes trains the system.",
             ],
         ),
     ]
-    _render_sections(frame, sections, heading_size=16, body_size=13.5,
-                     section_gap=13, bullet_gap=4, line=1.06)
+    _render_sections(frame, sections, heading_size=14, body_size=11.5,
+                     section_gap=11, bullet_gap=2, line=1.04)
+
+    _draw_sandbox_panel(slide)
 
     metric_strip(slide, [
         ("Already built", "a class of 24 students and four labs, marked end to end"),
         ("~10 minutes", "for a teacher to set up one lab"),
-        ("No extra cost", "ordinary hardware, no paid AI service"),
+        ("No extra cost", "ordinary hardware, and no AI cost per submission"),
     ])
+
+
+
+# --------------------------------------------------------------------------
+# How untrusted code is actually contained, in the shipped product
+# --------------------------------------------------------------------------
+# This sits beside "running students' programs safely on our own machine",
+# because a risk stated without its control is just a worry.
+SANDBOX_STACK = [
+    ("Its own tiny virtual machine",
+     "every submission gets a Firecracker microVM, not just a container, so an escape still lands nowhere"),
+    ("An allow-list of system calls",
+     "seccomp-bpf: anything not on the list is denied, and repeated denials from one student raise a flag"),
+    ("No network at all",
+     "no interfaces, no loopback, and the package manager is not reachable - nothing can phone home"),
+    ("Hard ceilings",
+     "memory, processes and CPU are capped, so a fork bomb or a runaway loop dies instead of the server"),
+    ("Destroyed after every run",
+     "one-shot machines, so nothing a student leaves behind can reach the next student"),
+    ("Nothing worth stealing inside",
+     "the answer key never enters, and workers hold no keys and no database - a full breach wins one job"),
+]
+
+
+def _draw_sandbox_panel(slide) -> None:
+    left, top, width = 7.32, 1.26, 5.62
+    height = 0.40 + 0.482 * len(SANDBOX_STACK)
+
+    back = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(left), Inches(top),
+                                  Inches(width), Inches(height))
+    back.fill.solid()
+    back.fill.fore_color.rgb = RGBColor(0xEC, 0xF2, 0xF9)
+    back.line.color.rgb = LAYER_FILL_ALT
+    back.line.width = Pt(0.75)
+    back.shadow.inherit = False
+    back.adjustments[0] = 0.035
+    set_autofit_off(back)
+    clear_text(back)
+
+    body = slide.shapes.add_textbox(Inches(left + 0.20), Inches(top + 0.13),
+                                    Inches(width - 0.40), Inches(height - 0.26))
+    set_autofit_off(body)
+    clear_text(body)
+    frame = body.text_frame
+    frame.word_wrap = True
+
+    add_line(frame, "Running untrusted code safely - the shipped design",
+             size=12.5, bold=True, colour=HEADING_BLUE, bullet=None, first=True,
+             spacing=1.0, after=6)
+    for title, detail in SANDBOX_STACK:
+        add_line(frame, title, size=11, bold=True, colour=ACCENT_BLUE,
+                 bullet="•", indent=0.10, spacing=1.0, after=0)
+        add_line(frame, detail, size=9.5, colour=BODY_BLACK, bullet=None,
+                 indent=0.24, spacing=1.02, after=4)
 
 
 def build_impact_slide(slide) -> None:
@@ -424,8 +484,68 @@ def build_impact_slide(slide) -> None:
             ],
         ),
     ]
-    _render_sections(frame, sections, heading_size=20, body_size=17.5,
-                     section_gap=34, bullet_gap=13, line=1.18)
+    _render_sections(frame, sections, heading_size=17, body_size=14.5,
+                     section_gap=17, bullet_gap=5, line=1.12)
+
+    _draw_product_band(slide)
+
+
+# --------------------------------------------------------------------------
+# What the finished product is, in three columns
+# --------------------------------------------------------------------------
+# Everything a judge would otherwise have to take on faith: that it fits an
+# existing college, that the claims are measurable, and that there is a route
+# from a demo to a deployment.
+PRODUCT_BAND = [
+    ("Works with what a college already has", [
+        "Plugs into Moodle, Canvas, Blackboard or Google Classroom (LTI 1.3).",
+        "Class lists come in, marks go back out - nobody keeps two gradebooks.",
+        "One parser reads 40+ languages, so it is not a Python-only tool.",
+        "Reports out as PDF, Excel or CSV for accreditation files.",
+    ]),
+    ("Claims we are willing to be measured on", [
+        "Agrees with teachers on held-back marking, or it does not ship.",
+        "Under 3% of released marks later overturned.",
+        "A submission marked in under three minutes at the deadline rush.",
+        "Students at risk flagged three weeks before it is too late.",
+    ]),
+    ("The road from here", [
+        "Today: a working prototype, marking a class of 24 end to end.",
+        "Semester 1: the models start learning; about 40% marked without a human.",
+        "Semester 2: about 70%, and the full picture of the course.",
+        "Semester 3: about 85%, steady, and the AI drafting replaced by our own model.",
+    ]),
+]
+
+
+def _draw_product_band(slide) -> None:
+    top, height = 4.34, 2.10
+    left, width, gap = 0.36, 4.06, 0.20
+
+    for index, (heading, lines) in enumerate(PRODUCT_BAND):
+        x = left + index * (width + gap)
+        back = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(x), Inches(top),
+                                      Inches(width), Inches(height))
+        back.fill.solid()
+        back.fill.fore_color.rgb = RGBColor(0xEC, 0xF2, 0xF9)
+        back.line.color.rgb = LAYER_FILL_ALT
+        back.line.width = Pt(0.75)
+        back.shadow.inherit = False
+        back.adjustments[0] = 0.055
+        set_autofit_off(back)
+        clear_text(back)
+
+        body = slide.shapes.add_textbox(Inches(x + 0.16), Inches(top + 0.12),
+                                        Inches(width - 0.32), Inches(height - 0.24))
+        set_autofit_off(body)
+        clear_text(body)
+        frame = body.text_frame
+        frame.word_wrap = True
+        add_line(frame, heading, size=11.5, bold=True, colour=HEADING_BLUE,
+                 bullet=None, first=True, spacing=1.02, after=5)
+        for line in lines:
+            add_line(frame, line, size=10, colour=BODY_BLACK, bullet="•",
+                     indent=0.10, spacing=1.04, after=3)
 
 
 def build_references_slide(slide) -> None:
